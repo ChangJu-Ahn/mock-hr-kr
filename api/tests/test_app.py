@@ -181,6 +181,7 @@ class WebConsoleTests(unittest.TestCase):
         self.assertIn("--sap-blue: #0a6ed1", css.text)
         self.assertIn(".status-badge", css.text)
         self.assertIn(".table-shell", css.text)
+        self.assertRegex(css.text, r"\.content-card,\s*section\s*\{[^}]*overflow-x:\s*auto;")
 
     def test_hire_form(self):
         before = len(self.db.list_employee_ids())

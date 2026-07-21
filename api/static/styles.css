@@ -55,7 +55,7 @@ p { line-height: 1.5; }
 .page-eyebrow { margin: 0 0 .25rem; color: var(--sap-blue); font-size: .75rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
 .page-subtitle { margin: .35rem 0 0; color: var(--sap-muted); }
 .content-card, .action-panel, .panel, section { background: var(--sap-surface); border: 1px solid var(--sap-border); border-radius: .5rem; box-shadow: var(--shadow-card); }
-.content-card, section { margin-bottom: 1rem; padding: 1rem; }
+.content-card, section { margin-bottom: 1rem; padding: 1rem; overflow-x: auto; }
 .action-panel { margin-bottom: 1rem; }
 .action-panel > summary { cursor: pointer; padding: .9rem 1rem; color: var(--sap-blue); font-weight: 700; }
 .action-panel[open] > summary { border-bottom: 1px solid var(--sap-border); }
