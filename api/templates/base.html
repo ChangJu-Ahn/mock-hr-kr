@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Mock HR{% endblock %}</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">Mock HR</a>
+    <nav>
+      <a href="/">Dashboard</a>
+      <a href="/employees">사원 Employees</a>
+      <a href="/departments">부서 Departments</a>
+      <a href="/positions">직급 Positions</a>
+      <a href="/courses">교육 Training</a>
+      <a href="/leave">연차·휴가 Leave</a>
+      <a href="/attendance">근태 Attendance</a>
+      <a href="/appointments">인사발령 Appointments</a>
+      <a href="/guide">사용법 Guide</a>
+      <a href="/api/docs">API Docs</a>
+    </nav>
+  </header>
+  <main class="container">
+    {% if message %}<div class="alert success">{{ message }}</div>{% endif %}
+    {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

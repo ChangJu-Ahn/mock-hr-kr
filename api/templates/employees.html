@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}사원 Employees · Mock HR{% endblock %}
+{% block content %}
+<h1>사원 Employees</h1>
+
+<section class="panel">
+  <h2>입사 처리 Hire employee</h2>
+  <form method="post" action="/employees/hire" class="row">
+    <label>이름 <input name="name" required></label>
+    <label>부서
+      <select name="dept_code" required>
+        {% for d in departments %}<option value="{{ d.dept_code }}">{{ d.dept_code }} — {{ d.dept_name }}</option>{% endfor %}
+      </select></label>
+    <label>직급
+      <select name="position_code" required>
+        {% for p in positions %}<option value="{{ p.position_code }}">{{ p.position_name }}</option>{% endfor %}
+      </select></label>
+    <label>고용형태
+      <select name="employment_type"><option>정규직</option><option>계약직</option><option>인턴</option></select></label>
+    <label>입사일 <input type="date" name="hire_date"></label>
+    <label>이메일 <input name="email"></label>
+    <label>연락처 <input name="phone"></label>
+    <label>관리자
+      <select name="manager_emp_id"><option value="">(없음)</option>
+        {% for m in managers %}<option value="{{ m.emp_id }}">{{ m.emp_id }} {{ m.name }}</option>{% endfor %}
+      </select></label>
+    <button type="submit">입사</button>
+  </form>
+</section>
+
+<form method="get" action="/employees" class="row filters">
+  <label>부서
+    <select name="dept_code"><option value="">전체</option>
+      {% for d in departments %}<option value="{{ d.dept_code }}" {% if filters.dept_code==d.dept_code %}selected{% endif %}>{{ d.dept_name }}</option>{% endfor %}
+    </select></label>
+  <label>직급
+    <select name="position_code"><option value="">전체</option>
+      {% for p in positions %}<option value="{{ p.position_code }}" {% if filters.position_code==p.position_code %}selected{% endif %}>{{ p.position_name }}</option>{% endfor %}
+    </select></label>
+  <label>상태
+    <select name="status_filter"><option value="">전체</option>
+      <option {% if filters.status_filter=='재직' %}selected{% endif %}>재직</option>
+      <option {% if filters.status_filter=='휴직' %}selected{% endif %}>휴직</option>
+      <option {% if filters.status_filter=='퇴직' %}selected{% endif %}>퇴직</option>
+    </select></label>
+  <label>고용형태
+    <select name="employment_type"><option value="">전체</option>
+      <option {% if filters.employment_type=='정규직' %}selected{% endif %}>정규직</option>
+      <option {% if filters.employment_type=='계약직' %}selected{% endif %}>계약직</option>
+      <option {% if filters.employment_type=='인턴' %}selected{% endif %}>인턴</option>
+    </select></label>
+  <label>검색 <input name="q" value="{{ filters.q }}" placeholder="이름/사번/이메일"></label>
+  <button type="submit">필터</button>
+</form>
+
+<table><thead><tr><th>사번</th><th>이름</th><th>부서</th><th>직급</th><th>고용형태</th>
+  <th>상태</th><th>입사일</th><th>관리자</th></tr></thead><tbody>
+{% for r in rows %}<tr>
+  <td><a href="/employees/{{ r.emp_id }}">{{ r.emp_id }}</a></td>
+  <td>{{ r.name }}</td><td>{{ r.dept_name or '' }}</td><td>{{ r.position_name or '' }}</td>
+  <td>{{ r.employment_type or '' }}</td><td>{{ r.status or '' }}</td>
+  <td>{{ r.hire_date or '' }}</td><td>{{ r.manager_name or '' }}</td></tr>
+{% else %}<tr><td colspan="8">사원 없음</td></tr>{% endfor %}
+</tbody></table>
+{% endblock %}

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Guide · Mock HR{% endblock %}
+{% block content %}
+<h1>사용법 & 업무 흐름 Guide</h1>
+
+<section class="panel">
+  <h2>이게 뭔가요? What is this?</h2>
+  <p>일반적인 인사관리 시스템(HRIS)을 흉내 낸 <strong>목업 HR</strong>입니다. 하나의 SQLite DB를 세 가지 창구로 노출합니다:
+     사람용 <strong>웹 콘솔</strong>, 에이전트용 <strong>REST API</strong>, 에이전트용 <strong>MCP 서버</strong>.
+     콜드 스타트마다 데이터가 새로 시딩됩니다. 데모 전용이라 실제 보안은 없습니다.</p>
+</section>
+
+<section>
+  <h2>전체 흐름 Overall flow</h2>
+  <ol class="flow">
+    <li><strong>입사 (Hire)</strong> — 부서·직급을 지정해 사원을 등록합니다. 등록 시 <strong>당해연도 연차가 자동 부여</strong>되고
+        <strong>입사 발령</strong>이 함께 기록됩니다.</li>
+    <li><strong>교육 (Training)</strong> — 법정필수·직무·리더십·어학 과정을 수강신청하고 이수/미이수 처리합니다.
+        법정필수 이수율이 대시보드에 집계됩니다.</li>
+    <li><strong>연차·휴가 (Leave)</strong> — 휴가를 신청(신청)하고 승인/반려합니다. <strong>승인 시 잔여 연차가 차감</strong>되며,
+        잔여가 부족하면 승인이 <strong>차단</strong>됩니다.</li>
+    <li><strong>근태 (Attendance)</strong> — 출근/퇴근을 기록하면 근무·연장 시간과 상태(지각/조퇴/정상)가 자동 계산됩니다.</li>
+    <li><strong>인사발령 (Appointment)</strong> — 승진·부서이동·휴직·복직·퇴직을 기록하면 사원정보(직급/부서/재직상태)에 즉시 반영됩니다.</li>
+  </ol>
+  <p class="mono">Hire ─▶ (연차부여+입사발령) ─▶ Training / Leave(승인시 연차차감) / Attendance ─▶ Appointment(사원정보 반영)</p>
+</section>
+
+<section>
+  <h2>기능별 사용법 Functions</h2>
+  <table><thead><tr><th>기능</th><th>설명</th><th>창구</th></tr></thead><tbody>
+    <tr><td>사원 정보</td><td>사원 목록·상세·입사</td><td>Web /employees · REST /api/employees</td></tr>
+    <tr><td>부서 관리</td><td>조직도·부서별 인원</td><td>Web /departments · REST /api/departments(/tree)</td></tr>
+    <tr><td>직급</td><td>직급·레벨·기본 연차</td><td>Web /positions · REST /api/positions</td></tr>
+    <tr><td>교육 관리</td><td>과정·수강신청·이수처리</td><td>Web /courses · REST /api/courses, /api/training-records</td></tr>
+    <tr><td>연차·휴가</td><td>휴가 신청·승인·잔여 연차</td><td>Web /leave · MCP submit_leave_request/decide_leave_request/get_leave_balance/list_leave_requests</td></tr>
+    <tr><td>근태 관리</td><td>출퇴근 기록·요약</td><td>Web /attendance · MCP log_attendance/list_attendance/get_attendance_summary</td></tr>
+    <tr><td>인사발령</td><td>승진·이동·휴복직·퇴직</td><td>Web /appointments · REST /api/appointments</td></tr>
+  </tbody></table>
+</section>
+
+<section class="panel">
+  <h2>에이전트 연결 Agent access</h2>
+  <p>REST와 MCP는 헤더 <code>X-API-Key: changjuahn</code>가 필요합니다. 웹 콘솔과 <code>/api/docs</code>는 공개입니다.</p>
+  <p><strong>REST</strong> (Employee·Department·Position·Course·Training·Appointment):</p>
+  <pre>curl -H "X-API-Key: changjuahn" https://&lt;fqdn&gt;/api/employees
+curl -X POST -H "X-API-Key: changjuahn" -H "Content-Type: application/json" \
+     -d '{"name":"홍길동","dept_code":"D110","position_code":"P1"}' https://&lt;fqdn&gt;/api/employees</pre>
+  <p><strong>MCP</strong> (Attendance·Leave), streamable HTTP at <code>/mcp</code> with the same header. Tools:
+     <code>log_attendance</code>, <code>list_attendance</code>, <code>get_attendance_summary</code>,
+     <code>submit_leave_request</code>, <code>decide_leave_request</code>, <code>get_leave_balance</code>,
+     <code>list_leave_requests</code>, <code>list_employees</code>, <code>get_employee</code>.</p>
+  <p>Full REST reference: <a href="/api/docs">/api/docs</a>.</p>
+</section>
+{% endblock %}

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}근태 Attendance · Mock HR{% endblock %}
+{% block content %}
+<h1>근태 Attendance</h1>
+<p class="muted">최근 근무일: {{ latest or '기록 없음' }}</p>
+
+<section class="panel">
+  <h2>근태 기록 Log attendance</h2>
+  <form method="post" action="/attendance/log" class="row">
+    <label>사원
+      <select name="emp_id" required>
+        {% for e in employees %}<option value="{{ e.emp_id }}">{{ e.emp_id }} {{ e.name }}</option>{% endfor %}
+      </select></label>
+    <label>근무일 <input type="date" name="work_date" required></label>
+    <label>출근 <input type="time" name="check_in"></label>
+    <label>퇴근 <input type="time" name="check_out"></label>
+    <label>상태(선택)
+      <select name="status_value"><option value="">자동판정</option>
+        {% for s in statuses %}<option>{{ s }}</option>{% endfor %}
+      </select></label>
+    <button type="submit">기록</button>
+  </form>
+  <p class="muted">출근/퇴근 입력 시 근무·연장 시간과 상태(지각/조퇴/정상)를 자동 계산합니다. 점심 1시간 공제.</p>
+</section>
+
+<section>
+  <h2>근태 요약 Summary</h2>
+  <table><thead><tr><th>상태</th><th>건수</th><th>인원</th><th>총 근무h</th><th>총 연장h</th></tr></thead><tbody>
+  {% for s in summary %}<tr><td>{{ s.status }}</td><td>{{ s.records }}</td><td>{{ s.employees }}</td>
+      <td>{{ s.total_hours|round(1) }}</td><td>{{ s.total_overtime|round(1) }}</td></tr>
+  {% else %}<tr><td colspan="5">기록 없음</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+
+<form method="get" action="/attendance" class="row filters">
+  <label>사원
+    <select name="emp_id"><option value="">전체</option>
+      {% for e in employees %}<option value="{{ e.emp_id }}" {% if filters.emp_id==e.emp_id %}selected{% endif %}>{{ e.emp_id }} {{ e.name }}</option>{% endfor %}
+    </select></label>
+  <label>근무일 <input type="date" name="work_date" value="{{ filters.work_date }}"></label>
+  <label>상태
+    <select name="status_filter"><option value="">전체</option>
+      {% for s in statuses %}<option {% if filters.status_filter==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+    </select></label>
+  <button type="submit">필터</button>
+</form>
+
+<section>
+  <h2>근태 기록 Records</h2>
+  <table><thead><tr><th>사원</th><th>부서</th><th>근무일</th><th>출근</th><th>퇴근</th>
+    <th>근무h</th><th>연장h</th><th>상태</th></tr></thead><tbody>
+  {% for r in rows %}<tr><td>{{ r.emp_id }} {{ r.emp_name or '' }}</td><td>{{ r.dept_name or '' }}</td>
+      <td>{{ r.work_date }}</td><td>{{ r.check_in or '' }}</td><td>{{ r.check_out or '' }}</td>
+      <td>{{ r.work_hours if r.work_hours is not none else '' }}</td>
+      <td>{{ r.overtime_hours if r.overtime_hours is not none else '' }}</td><td>{{ r.status }}</td></tr>
+  {% else %}<tr><td colspan="8">기록 없음</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+{% endblock %}

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}직급 Positions · Mock HR{% endblock %}
+{% block content %}
+<h1>직급 Positions</h1>
+<table><thead><tr><th>직급코드</th><th>직급명</th><th>레벨</th><th>기본 연차(일)</th><th>재직인원</th></tr></thead><tbody>
+{% for r in rows %}<tr><td>{{ r.position_code }}</td><td>{{ r.position_name }}</td><td>{{ r.level_no }}</td>
+    <td>{{ r.min_leave_days }}</td><td>{{ r.headcount }}</td></tr>
+{% else %}<tr><td colspan="5">직급 없음</td></tr>{% endfor %}
+</tbody></table>
+{% endblock %}

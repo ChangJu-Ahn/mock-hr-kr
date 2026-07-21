@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}{{ emp.name }} · Mock HR{% endblock %}
+{% block content %}
+<h1>{{ emp.name }} <span class="muted">{{ emp.emp_id }}</span></h1>
+<p><a href="/employees">← 사원 목록</a></p>
+
+<section class="panel">
+  <div class="detail-grid">
+    <div><strong>부서</strong><span>{{ emp.dept_name or '' }} ({{ emp.dept_code or '' }})</span></div>
+    <div><strong>직급</strong><span>{{ emp.position_name or '' }}</span></div>
+    <div><strong>고용형태</strong><span>{{ emp.employment_type or '' }}</span></div>
+    <div><strong>상태</strong><span>{{ emp.status or '' }}</span></div>
+    <div><strong>입사일</strong><span>{{ emp.hire_date or '' }}</span></div>
+    <div><strong>생년월일</strong><span>{{ emp.birth_date or '' }}</span></div>
+    <div><strong>이메일</strong><span>{{ emp.email or '' }}</span></div>
+    <div><strong>연락처</strong><span>{{ emp.phone or '' }}</span></div>
+    <div><strong>관리자</strong><span>{{ emp.manager_name or '' }}</span></div>
+  </div>
+</section>
+
+<div class="grid2">
+  <section>
+    <h2>연차현황 {% if emp.leave_balance %}({{ emp.leave_balance.year }}){% endif %}</h2>
+    {% if emp.leave_balance %}
+    <table><thead><tr><th>부여</th><th>사용</th><th>잔여</th></tr></thead><tbody>
+      <tr><td>{{ emp.leave_balance.entitled_days }}</td><td>{{ emp.leave_balance.used_days }}</td>
+          <td>{{ emp.leave_balance.remaining_days }}</td></tr>
+    </tbody></table>
+    {% else %}<p class="muted">연차 정보 없음</p>{% endif %}
+  </section>
+  <section>
+    <h2>최근 근태</h2>
+    <table><thead><tr><th>일자</th><th>출근</th><th>퇴근</th><th>근무h</th><th>상태</th></tr></thead><tbody>
+    {% for a in emp.attendance %}<tr><td>{{ a.work_date }}</td><td>{{ a.check_in or '' }}</td>
+        <td>{{ a.check_out or '' }}</td><td>{{ a.work_hours if a.work_hours is not none else '' }}</td>
+        <td>{{ a.status }}</td></tr>
+    {% else %}<tr><td colspan="5">기록 없음</td></tr>{% endfor %}
+    </tbody></table>
+  </section>
+</div>
+
+<section>
+  <h2>교육 이수</h2>
+  <table><thead><tr><th>과정</th><th>구분</th><th>신청일</th><th>이수일</th><th>상태</th><th>점수</th></tr></thead><tbody>
+  {% for t in emp.training %}<tr><td>{{ t.course_code }} {{ t.course_name or '' }}</td><td>{{ t.category or '' }}</td>
+      <td>{{ t.enroll_date or '' }}</td><td>{{ t.complete_date or '' }}</td><td>{{ t.status }}</td>
+      <td>{{ t.score if t.score is not none else '' }}</td></tr>
+  {% else %}<tr><td colspan="6">기록 없음</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+
+<section>
+  <h2>휴가 신청 이력</h2>
+  <table><thead><tr><th>유형</th><th>기간</th><th>일수</th><th>상태</th><th>사유</th></tr></thead><tbody>
+  {% for l in emp.leave_requests %}<tr><td>{{ l.leave_type }}</td><td>{{ l.start_date }} ~ {{ l.end_date }}</td>
+      <td>{{ l.days }}</td><td>{{ l.status }}</td><td>{{ l.reason or '' }}</td></tr>
+  {% else %}<tr><td colspan="5">기록 없음</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+
+<section>
+  <h2>인사발령 이력</h2>
+  <table><thead><tr><th>발령일</th><th>유형</th><th>부서</th><th>직급</th><th>비고</th></tr></thead><tbody>
+  {% for ap in emp.appointments %}<tr><td>{{ ap.effective_date }}</td><td>{{ ap.type }}</td>
+      <td>{{ ap.from_dept or '' }}{% if ap.to_dept %} → {{ ap.to_dept }}{% endif %}</td>
+      <td>{{ ap.from_position or '' }}{% if ap.to_position %} → {{ ap.to_position }}{% endif %}</td>
+      <td>{{ ap.note or '' }}</td></tr>
+  {% else %}<tr><td colspan="5">기록 없음</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+{% endblock %}
