@@ -953,7 +953,7 @@ def get_dashboard_summary() -> dict[str, Any]:
             "SELECT COUNT(*) FROM employee WHERE status='재직'").fetchone()[0]
         dept_total = conn.execute("SELECT COUNT(*) FROM department").fetchone()[0]
         employees_by_position = _rows(conn.execute(
-            "SELECT p.position_name, p.level_no, COUNT(e.emp_id) AS n "
+            "SELECT p.position_code, p.position_name, p.level_no, COUNT(e.emp_id) AS n "
             "FROM position p LEFT JOIN employee e ON e.position_code = p.position_code "
             "  AND e.status='재직' "
             "GROUP BY p.position_code, p.position_name, p.level_no ORDER BY p.level_no DESC"))

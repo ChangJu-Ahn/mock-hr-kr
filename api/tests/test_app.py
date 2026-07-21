@@ -187,6 +187,7 @@ class WebConsoleTests(unittest.TestCase):
         html = self.client.get("/").text
         self.assertIn('class="content-card quick-actions"', html)
         self.assertIn('class="kpi-grid"', html)
+        self.assertEqual(html.count('class="kpi-card"'), 5)
         self.assertIn("확인이 필요합니다", html)
         self.assertIn('href="/leave#leave-action"', html)
         self.assertIn('href="/attendance#attendance-action"', html)
@@ -198,6 +199,10 @@ class WebConsoleTests(unittest.TestCase):
             "변경 전", "변경 후", "직급코드", "직급명",
         ):
             self.assertIn(heading, html)
+        self.assertRegex(
+            html,
+            r"<tr><th>직급코드</th><th>직급명</th><th>레벨</th><th>재직인원</th></tr>",
+        )
         self.assertNotIn("E0034 방통상", html)
 
     def test_hire_form(self):

@@ -341,6 +341,17 @@ class DashboardTests(DbTestBase):
         self.assertEqual(s["leave_used"], 2.0)
         self.assertEqual(s["attendance_date"], "2026-07-06")
 
+    def test_dashboard_position_summary_exposes_position_code(self):
+        db = self.db
+        db.hire_employee("대시", "D1", "P1", year=2026)
+
+        rows = {r["position_code"]: r for r in db.get_dashboard_summary()["employees_by_position"]}
+
+        self.assertEqual(rows["P1"]["position_name"], "사원")
+        self.assertEqual(rows["P1"]["n"], 1)
+        self.assertEqual(rows["P4"]["position_name"], "과장")
+        self.assertEqual(rows["P4"]["n"], 0)
+
 
 class SeedTests(unittest.TestCase):
     @classmethod
