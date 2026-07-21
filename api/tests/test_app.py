@@ -205,6 +205,29 @@ class WebConsoleTests(unittest.TestCase):
         )
         self.assertNotIn("E0034 방통상", html)
 
+    def test_employee_table_uses_atomic_code_name_columns(self):
+        html = self.client.get("/employees").text
+        for heading in (
+            "사번", "이름", "부서코드", "부서명", "직급코드", "직급명",
+            "관리자 사번", "관리자 이름",
+        ):
+            self.assertIn(heading, html)
+        self.assertIn('id="employee-action"', html)
+        self.assertIn('class="filter-bar"', html)
+
+    def test_department_table_splits_parent_and_manager_identity(self):
+        html = self.client.get("/departments").text
+        for heading in (
+            "부서코드", "부서명", "상위부서코드", "상위부서명",
+            "부서장 사번", "부서장 이름",
+        ):
+            self.assertIn(heading, html)
+
+    def test_position_page_uses_shared_workspace_components(self):
+        html = self.client.get("/positions").text
+        self.assertIn("직급 관리", html)
+        self.assertIn('class="table-shell"', html)
+
     def test_hire_form(self):
         before = len(self.db.list_employee_ids())
         r = self.client.post("/employees/hire",

@@ -1,26 +1,64 @@
 {% extends "base.html" %}
-{% block title %}부서 Departments · Mock HR{% endblock %}
+{% from "_ui.html" import page_header, empty_row %}
+{% block title %}부서 관리 · Mock HR{% endblock %}
 {% block content %}
-<h1>부서 Departments</h1>
+{{ page_header('부서 관리', '조직 구조와 부서 책임자, 코스트센터 현황을 확인합니다.', '조직') }}
 
-<section class="panel">
-  <h2>조직도 Org tree</h2>
-  <table><thead><tr><th>부서코드</th><th>부서명</th><th>상위부서</th><th>부서장</th><th>코스트센터</th><th>재직인원</th></tr></thead><tbody>
-  {% for d in tree %}<tr>
-    <td>{{ d.dept_code }}</td>
-    <td><span style="padding-left: {{ d.depth * 20 }}px">{% if d.depth > 0 %}└ {% endif %}{{ d.dept_name }}</span></td>
-    <td>{{ d.parent_dept_code or '' }}</td>
-    <td>{{ d.manager_name or '' }}</td>
-    <td>{{ d.cost_center or '' }}</td>
-    <td>{{ d.headcount }}</td></tr>
-  {% else %}<tr><td colspan="6">부서 없음</td></tr>{% endfor %}
-  </tbody></table>
+<section class="content-card" aria-labelledby="department-tree-title">
+  <h2 id="department-tree-title">조직도</h2>
+  <div class="table-shell">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>부서코드</th>
+          <th>부서명</th>
+          <th>상위부서코드</th>
+          <th>상위부서명</th>
+          <th>부서장 사번</th>
+          <th>부서장 이름</th>
+          <th>코스트센터</th>
+          <th>재직인원</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in tree %}
+        <tr>
+          <td>{{ d.dept_code }}</td>
+          <td><span style="padding-left: {{ d.depth * 20 }}px; display: inline-block;">{{ d.dept_name }}</span></td>
+          <td>{{ d.parent_dept_code or '—' }}</td>
+          <td>{{ d.parent_dept_name or '—' }}</td>
+          <td>{{ d.manager_emp_id or '—' }}</td>
+          <td>{{ d.manager_name or '—' }}</td>
+          <td>{{ d.cost_center or '—' }}</td>
+          <td>{{ d.headcount }}</td>
+        </tr>
+        {% else %}
+        {{ empty_row(8, '등록된 부서가 없습니다.') }}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 
-<section>
-  <h2>부서별 인원 현황</h2>
-  <table><thead><tr><th>부서코드</th><th>부서명</th><th>재직인원</th></tr></thead><tbody>
-  {% for h in headcounts %}<tr><td>{{ h.dept_code }}</td><td>{{ h.dept_name }}</td><td>{{ h.headcount }}</td></tr>{% endfor %}
-  </tbody></table>
+<section class="content-card" aria-labelledby="department-headcount-title">
+  <h2 id="department-headcount-title">부서별 인원 현황</h2>
+  <div class="table-shell">
+    <table class="data-table">
+      <thead>
+        <tr><th>부서코드</th><th>부서명</th><th>재직인원</th></tr>
+      </thead>
+      <tbody>
+        {% for h in headcounts %}
+        <tr>
+          <td>{{ h.dept_code }}</td>
+          <td>{{ h.dept_name }}</td>
+          <td>{{ h.headcount }}</td>
+        </tr>
+        {% else %}
+        {{ empty_row(3, '표시할 부서별 인원 현황이 없습니다.') }}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 {% endblock %}

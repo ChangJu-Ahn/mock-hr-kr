@@ -1,10 +1,30 @@
 {% extends "base.html" %}
-{% block title %}직급 Positions · Mock HR{% endblock %}
+{% from "_ui.html" import page_header, empty_row %}
+{% block title %}직급 관리 · Mock HR{% endblock %}
 {% block content %}
-<h1>직급 Positions</h1>
-<table><thead><tr><th>직급코드</th><th>직급명</th><th>레벨</th><th>기본 연차(일)</th><th>재직인원</th></tr></thead><tbody>
-{% for r in rows %}<tr><td>{{ r.position_code }}</td><td>{{ r.position_name }}</td><td>{{ r.level_no }}</td>
-    <td>{{ r.min_leave_days }}</td><td>{{ r.headcount }}</td></tr>
-{% else %}<tr><td colspan="5">직급 없음</td></tr>{% endfor %}
-</tbody></table>
+{{ page_header('직급 관리', '직급 체계와 레벨별 기본 연차, 재직 인원을 확인합니다.', '조직') }}
+
+<section class="content-card" aria-labelledby="position-table-title">
+  <h2 id="position-table-title">직급 기준 정보</h2>
+  <div class="table-shell">
+    <table class="data-table">
+      <thead>
+        <tr><th>직급코드</th><th>직급명</th><th>레벨</th><th>기본 연차(일)</th><th>재직인원</th></tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r.position_code }}</td>
+          <td>{{ r.position_name }}</td>
+          <td>{{ r.level_no }}</td>
+          <td>{{ r.min_leave_days }}</td>
+          <td>{{ r.headcount }}</td>
+        </tr>
+        {% else %}
+        {{ empty_row(5, '등록된 직급이 없습니다.') }}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
 {% endblock %}
