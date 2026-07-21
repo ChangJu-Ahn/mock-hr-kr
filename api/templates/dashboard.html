@@ -1,73 +1,276 @@
 {% extends "base.html" %}
-{% block title %}Dashboard · Mock HR{% endblock %}
+{% from "_ui.html" import page_header, status_badge, empty_row %}
+{% block title %}인사 운영 현황 · Mock HR{% endblock %}
 {% block content %}
-<h1>HR Dashboard</h1>
-<section class="cards">
-  <div class="card"><div class="kpi">{{ summary.active_total }}</div><div class="label">재직 사원</div></div>
-  <div class="card"><div class="kpi">{{ summary.emp_total }}</div><div class="label">총 사원(누적)</div></div>
-  <div class="card"><div class="kpi">{{ summary.dept_total }}</div><div class="label">부서</div></div>
-  <div class="card"><div class="kpi">{{ summary.pending_leave }}</div><div class="label">휴가 승인대기</div></div>
-  <div class="card"><div class="kpi">{{ summary.leave_usage_pct }}%</div><div class="label">연차 사용률</div></div>
-  <div class="card"><div class="kpi">{{ summary.training_mandatory.rate }}%</div><div class="label">법정필수 이수율</div></div>
+{{ page_header('인사 운영 현황', '조직·휴가·교육·근태의 주요 지표와 처리 항목을 한눈에 확인합니다.', '홈') }}
+
+<section class="content-card quick-actions" aria-labelledby="quick-actions-title">
+  <h2 id="quick-actions-title">빠른 작업</h2>
+  <div class="row">
+    <a class="button" href="/employees#employee-action">사원 등록</a>
+    <a class="button button--secondary" href="/leave#leave-action">휴가 신청</a>
+    <a class="button button--secondary" href="/attendance#attendance-action">근태 기록</a>
+    <a class="button button--secondary" href="/appointments#appointment-action">인사발령</a>
+  </div>
+</section>
+
+<div class="kpi-grid">
+  <article class="kpi-card">
+    <div class="kpi-card__value">{{ summary.active_total }}</div>
+    <div class="kpi-card__label">재직 사원</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-card__value">{{ summary.emp_total }}</div>
+    <div class="kpi-card__label">총 사원(누적)</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-card__value">{{ summary.dept_total }}</div>
+    <div class="kpi-card__label">운영 부서</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-card__value">{{ summary.pending_leave }}</div>
+    <div class="kpi-card__label">휴가 승인 대기</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-card__value">{{ summary.leave_usage_pct }}%</div>
+    <div class="kpi-card__label">연차 사용률</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-card__value">{{ summary.training_mandatory.rate }}%</div>
+    <div class="kpi-card__label">필수교육 이수율</div>
+  </article>
+</div>
+
+{% set ns = namespace(attendance_exceptions=0) %}
+{% for item in summary.attendance_today %}
+  {% if item.status != '정상' %}
+    {% set ns.attendance_exceptions = ns.attendance_exceptions + item.records %}
+  {% endif %}
+{% endfor %}
+<section class="content-card">
+  <h2>확인이 필요합니다</h2>
+  <div class="attention-grid">
+    <a class="attention-item" href="/leave?status_filter=신청">
+      <span>휴가 승인 대기</span>
+      <strong>{{ summary.pending_leave }}건</strong>
+    </a>
+    <a class="attention-item" href="/courses?status_filter=미이수">
+      <span>필수교육 미이수</span>
+      <strong>{{ summary.training_mandatory.total - summary.training_mandatory.completed }}건</strong>
+    </a>
+    <a class="attention-item" href="/attendance?work_date={{ summary.attendance_date or '' }}">
+      <span>최근 근무일 근태 예외</span>
+      <strong>{{ ns.attendance_exceptions }}건</strong>
+    </a>
+  </div>
 </section>
 
 <div class="grid2">
-  <section>
+  <section class="content-card">
     <h2>부서별 인원</h2>
-    <table><thead><tr><th>부서</th><th>인원</th></tr></thead><tbody>
-    {% for d in summary.headcount_by_dept %}<tr><td>{{ d.dept_code }} {{ d.dept_name }}</td><td>{{ d.headcount }}</td></tr>
-    {% else %}<tr><td colspan="2">없음</td></tr>{% endfor %}
-    </tbody></table>
+    <div class="table-shell">
+      <table class="data-table">
+        <thead>
+          <tr><th>부서코드</th><th>부서명</th><th>재직인원</th></tr>
+        </thead>
+        <tbody>
+          {% for d in summary.headcount_by_dept %}
+          <tr>
+            <td>{{ d.dept_code }}</td>
+            <td>{{ d.dept_name }}</td>
+            <td>{{ d.headcount }}</td>
+          </tr>
+          {% else %}
+          {{ empty_row(3, '표시할 부서가 없습니다.') }}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </section>
-  <section>
+
+  <section class="content-card">
     <h2>직급별 인원</h2>
-    <table><thead><tr><th>직급</th><th>Lv</th><th>인원</th></tr></thead><tbody>
-    {% for p in summary.employees_by_position %}<tr><td>{{ p.position_name }}</td><td>{{ p.level_no }}</td><td>{{ p.n }}</td></tr>{% endfor %}
-    </tbody></table>
+    <div class="table-shell">
+      <table class="data-table">
+        <thead>
+          <tr><th>직급명</th><th>레벨</th><th>재직인원</th></tr>
+        </thead>
+        <tbody>
+          {% for p in summary.employees_by_position %}
+          <tr>
+            <td>{{ p.position_name }}</td>
+            <td>{{ p.level_no }}</td>
+            <td>{{ p.n }}</td>
+          </tr>
+          {% else %}
+          {{ empty_row(3, '표시할 직급이 없습니다.') }}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </section>
 </div>
 
 <div class="grid2">
-  <section>
+  <section class="content-card">
     <h2>재직 상태</h2>
-    <table><thead><tr><th>상태</th><th>인원</th></tr></thead><tbody>
-    {% for s in summary.employees_by_status %}<tr><td>{{ s.status }}</td><td>{{ s.n }}</td></tr>{% endfor %}
-    </tbody></table>
+    <div class="table-shell">
+      <table class="data-table">
+        <thead>
+          <tr><th>상태</th><th>인원</th></tr>
+        </thead>
+        <tbody>
+          {% for s in summary.employees_by_status %}
+          <tr>
+            <td>{{ status_badge(s.status) }}</td>
+            <td>{{ s.n }}</td>
+          </tr>
+          {% else %}
+          {{ empty_row(2, '표시할 재직 상태가 없습니다.') }}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
     <h2>고용형태(재직)</h2>
-    <table><thead><tr><th>형태</th><th>인원</th></tr></thead><tbody>
-    {% for t in summary.employees_by_type %}<tr><td>{{ t.employment_type }}</td><td>{{ t.n }}</td></tr>{% endfor %}
-    </tbody></table>
+    <div class="table-shell">
+      <table class="data-table">
+        <thead>
+          <tr><th>형태</th><th>인원</th></tr>
+        </thead>
+        <tbody>
+          {% for t in summary.employees_by_type %}
+          <tr>
+            <td>{{ t.employment_type }}</td>
+            <td>{{ t.n }}</td>
+          </tr>
+          {% else %}
+          {{ empty_row(2, '표시할 고용형태가 없습니다.') }}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </section>
-  <section>
-    <h2>오늘 근태 <span class="muted">({{ summary.attendance_date or '기록 없음' }})</span></h2>
-    <table><thead><tr><th>상태</th><th>건수</th><th>인원</th><th>근무h</th><th>연장h</th></tr></thead><tbody>
-    {% for a in summary.attendance_today %}<tr><td>{{ a.status }}</td><td>{{ a.records }}</td>
-        <td>{{ a.employees }}</td><td>{{ a.total_hours|round(1) }}</td><td>{{ a.total_overtime|round(1) }}</td></tr>
-    {% else %}<tr><td colspan="5">기록 없음</td></tr>{% endfor %}
-    </tbody></table>
-    <p class="muted">연차 부여 {{ summary.leave_entitled|round(0) }}일 · 사용 {{ summary.leave_used|round(1) }}일 ·
-       법정필수 교육 {{ summary.training_mandatory.completed }}/{{ summary.training_mandatory.total }} 이수</p>
+
+  <section class="content-card">
+    <h2>최근 근무일 근태 <span class="muted">({{ summary.attendance_date or '기록 없음' }})</span></h2>
+    <div class="table-shell">
+      <table class="data-table">
+        <thead>
+          <tr><th>상태</th><th>건수</th><th>인원</th><th>근무h</th><th>연장h</th></tr>
+        </thead>
+        <tbody>
+          {% for a in summary.attendance_today %}
+          <tr>
+            <td>{{ status_badge(a.status) }}</td>
+            <td>{{ a.records }}</td>
+            <td>{{ a.employees }}</td>
+            <td>{{ a.total_hours|round(1) }}</td>
+            <td>{{ a.total_overtime|round(1) }}</td>
+          </tr>
+          {% else %}
+          {{ empty_row(5, '근태 기록이 없습니다.') }}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="muted">
+      연차 부여 {{ summary.leave_entitled|round(0) }}일 · 사용 {{ summary.leave_used|round(1) }}일 ·
+      법정필수 교육 {{ summary.training_mandatory.completed }}/{{ summary.training_mandatory.total }} 이수
+    </p>
   </section>
 </div>
 
-<section>
+<section class="content-card">
   <h2>최근 인사발령</h2>
-  <table><thead><tr><th>ID</th><th>사원</th><th>발령일</th><th>유형</th><th>부서</th><th>직급</th><th>비고</th></tr></thead><tbody>
-  {% for r in summary.recent_appointments %}<tr><td>{{ r.id }}</td>
-      <td>{{ r.emp_id }} {{ r.emp_name or '' }}</td><td>{{ r.effective_date }}</td><td>{{ r.type }}</td>
-      <td>{{ r.from_dept or '' }}{% if r.to_dept %} → {{ r.to_dept }}{% endif %}</td>
-      <td>{{ r.from_position or '' }}{% if r.to_position %} → {{ r.to_position }}{% endif %}</td>
-      <td>{{ r.note or '' }}</td></tr>{% endfor %}
-  </tbody></table>
+  <div class="table-shell">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th rowspan="2" class="sticky-id">사번</th>
+          <th rowspan="2" class="sticky-name">이름</th>
+          <th rowspan="2">발령일</th>
+          <th rowspan="2">유형</th>
+          <th colspan="4" class="group-heading">변경 전</th>
+          <th colspan="4" class="group-heading">변경 후</th>
+          <th rowspan="2">비고</th>
+        </tr>
+        <tr>
+          <th>부서코드</th><th>부서명</th><th>직급코드</th><th>직급명</th>
+          <th>부서코드</th><th>부서명</th><th>직급코드</th><th>직급명</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in summary.recent_appointments %}
+        {% set after_dept_code = r.to_dept or r.from_dept %}
+        {% set after_dept_name = r.to_dept_name or r.from_dept_name %}
+        {% set after_position_code = r.to_position or r.from_position %}
+        {% set after_position_name = r.to_position_name or r.from_position_name %}
+        <tr>
+          <td class="sticky-id business-id">{{ r.emp_id }}</td>
+          <td class="sticky-name">{{ r.emp_name or '—' }}</td>
+          <td>{{ r.effective_date }}</td>
+          <td>{{ r.type }}</td>
+          <td>{{ r.from_dept or '—' }}</td>
+          <td>{{ r.from_dept_name or '—' }}</td>
+          <td>{{ r.from_position or '—' }}</td>
+          <td>{{ r.from_position_name or '—' }}</td>
+          <td>{{ after_dept_code or '—' }}</td>
+          <td>{{ after_dept_name or '—' }}</td>
+          <td>{{ after_position_code or '—' }}</td>
+          <td>{{ after_position_name or '—' }}</td>
+          <td>
+            {{ r.note or '—' }}
+            <div class="muted mono">ID {{ r.id }}</div>
+          </td>
+        </tr>
+        {% else %}
+        {{ empty_row(13, '인사발령 기록이 없습니다.') }}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 
-<section>
+<section class="content-card">
   <h2>최근 휴가신청</h2>
-  <table><thead><tr><th>ID</th><th>사원</th><th>유형</th><th>기간</th><th>일수</th><th>상태</th><th>사유</th></tr></thead><tbody>
-  {% for r in summary.recent_leaves %}<tr><td>{{ r.id }}</td>
-      <td>{{ r.emp_id }} {{ r.emp_name or '' }}</td><td>{{ r.leave_type }}</td>
-      <td>{{ r.start_date }} ~ {{ r.end_date }}</td><td>{{ r.days }}</td><td>{{ r.status }}</td>
-      <td>{{ r.reason or '' }}</td></tr>{% endfor %}
-  </tbody></table>
+  <div class="table-shell">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>사번</th>
+          <th>이름</th>
+          <th>부서코드</th>
+          <th>부서명</th>
+          <th>유형</th>
+          <th>시작일</th>
+          <th>종료일</th>
+          <th>일수</th>
+          <th>상태</th>
+          <th>사유</th>
+          <th>ID</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in summary.recent_leaves %}
+        <tr>
+          <td class="business-id">{{ r.emp_id }}</td>
+          <td>{{ r.emp_name or '—' }}</td>
+          <td>{{ r.dept_code or '—' }}</td>
+          <td>{{ r.dept_name or '—' }}</td>
+          <td>{{ r.leave_type }}</td>
+          <td>{{ r.start_date }}</td>
+          <td>{{ r.end_date }}</td>
+          <td>{{ r.days }}</td>
+          <td>{{ status_badge(r.status) }}</td>
+          <td>{{ r.reason or '—' }}</td>
+          <td class="mono">{{ r.id }}</td>
+        </tr>
+        {% else %}
+        {{ empty_row(11, '휴가 신청 기록이 없습니다.') }}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 {% endblock %}

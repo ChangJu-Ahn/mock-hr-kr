@@ -183,6 +183,23 @@ class WebConsoleTests(unittest.TestCase):
         self.assertIn(".table-shell", css.text)
         self.assertRegex(css.text, r"\.content-card,\s*section\s*\{[^}]*overflow-x:\s*auto;")
 
+    def test_dashboard_uses_hybrid_home_layout(self):
+        html = self.client.get("/").text
+        self.assertIn('class="content-card quick-actions"', html)
+        self.assertIn('class="kpi-grid"', html)
+        self.assertIn("확인이 필요합니다", html)
+        self.assertIn('href="/leave#leave-action"', html)
+        self.assertIn('href="/attendance#attendance-action"', html)
+
+    def test_dashboard_uses_atomic_identity_and_org_columns(self):
+        html = self.client.get("/").text
+        for heading in (
+            "사번", "이름", "부서코드", "부서명",
+            "변경 전", "변경 후", "직급코드", "직급명",
+        ):
+            self.assertIn(heading, html)
+        self.assertNotIn("E0034 방통상", html)
+
     def test_hire_form(self):
         before = len(self.db.list_employee_ids())
         r = self.client.post("/employees/hire",
