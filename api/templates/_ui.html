@@ -1,0 +1,33 @@
+{% macro page_header(title, subtitle, eyebrow='인사 운영') -%}
+<header class="page-header">
+  <div>
+    <p class="page-eyebrow">{{ eyebrow }}</p>
+    <h1>{{ title }}</h1>
+    {% if subtitle %}<p class="page-subtitle">{{ subtitle }}</p>{% endif %}
+  </div>
+</header>
+{%- endmacro %}
+
+{% macro status_badge(value) -%}
+  {% set positive = ['재직', '승인', '이수', '정상', '필수'] %}
+  {% set info = ['신청', '수강중', '재택'] %}
+  {% set warning = ['휴직', '지각', '조퇴'] %}
+  {% set negative = ['반려', '퇴직', '미이수', '결근', '취소'] %}
+  {% if value in positive %}{% set tone = 'positive' %}
+  {% elif value in info %}{% set tone = 'info' %}
+  {% elif value in warning %}{% set tone = 'warning' %}
+  {% elif value in negative %}{% set tone = 'negative' %}
+  {% else %}{% set tone = 'neutral' %}{% endif %}
+<span class="status-badge status-badge--{{ tone }}">{{ value or '—' }}</span>
+{%- endmacro %}
+
+{% macro message_strip(kind, text) -%}
+<div class="message-strip message-strip--{{ kind }}" role="status">
+  <span class="message-strip__icon" aria-hidden="true">{% if kind == 'success' %}✓{% else %}!{% endif %}</span>
+  <span>{{ text }}</span>
+</div>
+{%- endmacro %}
+
+{% macro empty_row(colspan, message) -%}
+<tr><td class="empty-state" colspan="{{ colspan }}">{{ message }}</td></tr>
+{%- endmacro %}

@@ -166,6 +166,22 @@ class WebConsoleTests(unittest.TestCase):
         emp_id = self.db.list_employee_ids()[0]
         self.assertEqual(self.client.get(f"/employees/{emp_id}").status_code, 200)
 
+    def test_successfactors_inspired_shell_is_present(self):
+        html = self.client.get("/").text
+        self.assertIn('class="shellbar"', html)
+        self.assertIn('class="shell-search"', html)
+        self.assertIn('action="/employees"', html)
+        self.assertIn('name="q"', html)
+        self.assertIn('aria-label="업무 메뉴"', html)
+        self.assertIn('id="main-content"', html)
+
+    def test_horizon_design_tokens_are_served(self):
+        css = self.client.get("/static/styles.css")
+        self.assertEqual(css.status_code, 200)
+        self.assertIn("--sap-blue: #0a6ed1", css.text)
+        self.assertIn(".status-badge", css.text)
+        self.assertIn(".table-shell", css.text)
+
     def test_hire_form(self):
         before = len(self.db.list_employee_ids())
         r = self.client.post("/employees/hire",

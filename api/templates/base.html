@@ -1,3 +1,4 @@
+{% from "_ui.html" import message_strip %}
 <!doctype html>
 <html lang="ko">
 <head>
@@ -8,24 +9,40 @@
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
 </head>
 <body>
-  <header class="topbar">
-    <a class="brand" href="/">Mock HR</a>
-    <nav>
-      <a href="/">Dashboard</a>
-      <a href="/employees">사원 Employees</a>
-      <a href="/departments">부서 Departments</a>
-      <a href="/positions">직급 Positions</a>
-      <a href="/courses">교육 Training</a>
-      <a href="/leave">연차·휴가 Leave</a>
-      <a href="/attendance">근태 Attendance</a>
-      <a href="/appointments">인사발령 Appointments</a>
-      <a href="/guide">사용법 Guide</a>
-      <a href="/api/docs">API Docs</a>
-    </nav>
+  <a class="skip-link" href="#main-content">본문으로 건너뛰기</a>
+  <header class="shellbar">
+    <a class="shellbar__brand" href="/" aria-label="Mock HR 홈">
+      <span class="shellbar__mark" aria-hidden="true">HR</span>
+      <span>Mock HR</span>
+    </a>
+    <form class="shell-search" method="get" action="/employees" role="search">
+      <label class="sr-only" for="global-search">사원 검색</label>
+      <span aria-hidden="true">⌕</span>
+      <input id="global-search" name="q" placeholder="사번, 이름, 이메일 검색">
+    </form>
+    <div class="shellbar__actions">
+      <a href="/guide">도움말</a>
+      <span class="user-chip"><span aria-hidden="true">운</span> HR 운영자</span>
+    </div>
   </header>
-  <main class="container">
-    {% if message %}<div class="alert success">{{ message }}</div>{% endif %}
-    {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+  <nav class="work-nav" aria-label="업무 메뉴">
+    <a href="/" {% if request.url.path == '/' %}aria-current="page"{% endif %}>홈</a>
+    <a href="/employees" {% if request.url.path.startswith('/employees') %}aria-current="page"{% endif %}>사원</a>
+    <details>
+      <summary>조직</summary>
+      <div class="nav-popover"><a href="/departments">부서</a><a href="/positions">직급</a></div>
+    </details>
+    <a href="/courses" {% if request.url.path == '/courses' %}aria-current="page"{% endif %}>교육</a>
+    <details>
+      <summary>휴가·근태</summary>
+      <div class="nav-popover"><a href="/leave">연차·휴가</a><a href="/attendance">근태</a></div>
+    </details>
+    <a href="/appointments" {% if request.url.path == '/appointments' %}aria-current="page"{% endif %}>인사관리</a>
+    <a href="/api/docs">API</a>
+  </nav>
+  <main id="main-content" class="page-shell">
+    {% if message %}{{ message_strip('success', message) }}{% endif %}
+    {% if error %}{{ message_strip('error', error) }}{% endif %}
     {% block content %}{% endblock %}
   </main>
 </body>
