@@ -83,6 +83,11 @@ class DepartmentPositionTests(DbTestBase):
         codes = [r["dept_code"] for r in tree]
         self.assertLess(codes.index("D0"), codes.index("D1"))
 
+    def test_org_tree_includes_parent_department_name(self):
+        by_code = {r["dept_code"]: r for r in self.db.get_org_tree()}
+        self.assertIsNone(by_code["D0"]["parent_dept_name"])
+        self.assertEqual(by_code["D1"]["parent_dept_name"], "본사")
+
     def test_headcount_reflects_active_only(self):
         db = self.db
         db.hire_employee("갑", "D1", "P1", year=2026)
@@ -276,6 +281,26 @@ class AppointmentTests(DbTestBase):
         self.assertEqual(row["from_dept"], "D1")
         self.assertEqual(row["to_dept"], "D2")
         self.assertEqual(db.get_employee(self.emp)["dept_code"], "D2")
+
+    def test_appointment_rows_include_department_and_position_names(self):
+        db = self.db
+        transfer = db.create_appointment(
+            self.emp, "부서이동", to_dept="D2", effective_date="2026-02-01"
+        )
+        self.assertEqual(transfer["from_dept_name"], "인사팀")
+        self.assertEqual(transfer["to_dept_name"], "개발팀")
+        self.assertEqual(transfer["from_position_name"], "사원")
+        self.assertIsNone(transfer["to_position_name"])
+
+        promotion = db.create_appointment(
+            self.emp, "승진", to_position="P4", effective_date="2026-03-01"
+        )
+        self.assertEqual(promotion["from_position_name"], "사원")
+        self.assertEqual(promotion["to_position_name"], "과장")
+
+        detail_rows = self.db.get_employee(self.emp)["appointments"]
+        self.assertTrue(all("from_dept_name" in row for row in detail_rows))
+        self.assertTrue(all("to_position_name" in row for row in detail_rows))
 
     def test_leave_and_return_status(self):
         db = self.db

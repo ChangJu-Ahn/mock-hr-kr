@@ -57,6 +57,11 @@ class RestApiTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/departments/D110").status_code, 200)
         self.assertEqual(self.client.get("/api/departments/NOPE").status_code, 404)
 
+    def test_departments_include_parent_name(self):
+        rows = self.client.get("/api/departments/tree").json()
+        child = next(row for row in rows if row["parent_dept_code"])
+        self.assertIsNotNone(child["parent_dept_name"])
+
     def test_positions_and_courses(self):
         self.assertEqual(len(self.client.get("/api/positions").json()), 7)
         mand = self.client.get("/api/courses", params={"is_mandatory": True}).json()
@@ -111,6 +116,19 @@ class RestApiTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         detail = self.client.get(f"/api/employees/{emp['emp_id']}").json()
         self.assertEqual(detail["position_code"], "P4")
+
+    def test_appointment_response_includes_display_names(self):
+        emp = self.client.post(
+            "/api/employees",
+            json={"name": "표시명검증", "dept_code": "D110", "position_code": "P1"},
+        ).json()
+        row = self.client.post(
+            "/api/appointments",
+            json={"emp_id": emp["emp_id"], "type": "승진", "to_position": "P4"},
+        ).json()
+        self.assertEqual(row["from_dept_name"], "인사팀")
+        self.assertEqual(row["from_position_name"], "사원")
+        self.assertEqual(row["to_position_name"], "과장")
 
     def test_appointment_missing_target_is_400(self):
         emp = self.client.post(

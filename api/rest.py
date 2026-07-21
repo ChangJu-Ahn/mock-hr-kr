@@ -33,6 +33,7 @@ class DepartmentRow(BaseModel):
     dept_code: str
     dept_name: str
     parent_dept_code: str | None = None
+    parent_dept_name: str | None = None
     manager_emp_id: str | None = None
     manager_name: str | None = None
     cost_center: str | None = None
@@ -99,8 +100,12 @@ class AppointmentRow(BaseModel):
     type: str
     from_dept: str | None = None
     to_dept: str | None = None
+    from_dept_name: str | None = None
+    to_dept_name: str | None = None
     from_position: str | None = None
     to_position: str | None = None
+    from_position_name: str | None = None
+    to_position_name: str | None = None
     note: str | None = None
 
 

@@ -272,10 +272,12 @@ def _leave_days(leave_type: str | None, start_date: str, end_date: str) -> float
 # --------------------------------------------------------------------------- #
 
 _DEPT_SELECT = (
-    "SELECT d.*, m.name AS manager_name, "
+    "SELECT d.*, parent.dept_name AS parent_dept_name, m.name AS manager_name, "
     "  (SELECT COUNT(*) FROM employee e WHERE e.dept_code = d.dept_code AND e.status='재직') "
     "    AS headcount "
-    "FROM department d LEFT JOIN employee m ON m.emp_id = d.manager_emp_id "
+    "FROM department d "
+    "LEFT JOIN department parent ON parent.dept_code = d.parent_dept_code "
+    "LEFT JOIN employee m ON m.emp_id = d.manager_emp_id "
 )
 
 
@@ -410,7 +412,7 @@ def get_employee(emp_id):
             "SELECT * FROM leave_request WHERE emp_id = ? ORDER BY id DESC LIMIT 10", (emp_id,)
         ).fetchall()
         appts = conn.execute(
-            "SELECT * FROM appointment WHERE emp_id = ? ORDER BY id", (emp_id,)
+            _APT_SELECT + "WHERE ap.emp_id = ? ORDER BY ap.id", (emp_id,)
         ).fetchall()
     out = dict(emp)
     out["leave_balance"] = dict(bal) if bal else None
@@ -863,8 +865,15 @@ def latest_work_date():
 # --------------------------------------------------------------------------- #
 
 _APT_SELECT = (
-    "SELECT ap.*, e.name AS emp_name FROM appointment ap "
+    "SELECT ap.*, e.name AS emp_name, "
+    "fd.dept_name AS from_dept_name, td.dept_name AS to_dept_name, "
+    "fp.position_name AS from_position_name, tp.position_name AS to_position_name "
+    "FROM appointment ap "
     "LEFT JOIN employee e ON e.emp_id = ap.emp_id "
+    "LEFT JOIN department fd ON fd.dept_code = ap.from_dept "
+    "LEFT JOIN department td ON td.dept_code = ap.to_dept "
+    "LEFT JOIN position fp ON fp.position_code = ap.from_position "
+    "LEFT JOIN position tp ON tp.position_code = ap.to_position "
 )
 
 _APT_TYPES = ("입사", "승진", "부서이동", "휴직", "복직", "퇴직")
