@@ -1293,7 +1293,7 @@ Stop the visual companion and remove only local artifacts:
 ```bash
 /Users/changjuahn/.copilot/installed-plugins/superpowers-marketplace/superpowers/skills/brainstorming/scripts/stop-server.sh \
   /Users/changjuahn/Repo/mock-hr-kr/.superpowers/brainstorm/52295-1784674843
-rm -rf .superpowers
+rm -rf /Users/changjuahn/Repo/mock-hr-kr/.superpowers/brainstorm
 rm -f data/hr_ui_e2e.db*
 ```
 
@@ -1307,7 +1307,8 @@ git commit -m "Document SuccessFactors-inspired web console
 
 Co-authored-by: Copilot App <223556219+Copilot@users.noreply.github.com>
 Copilot-Session: ba94d4ac-6efc-4486-b024-d0cf36bad1de"
-git push origin main
+BRANCH="$(git branch --show-current)"
+git push -u origin "$BRANCH"
 ```
 
 - [ ] **Step 8: Wait for GHCR image workflow**
@@ -1315,7 +1316,8 @@ git push origin main
 Run:
 
 ```bash
-RUN_ID="$(gh run list --repo ChangJu-Ahn/mock-hr-kr --workflow build-images --limit 1 --json databaseId -q '.[0].databaseId')"
+BRANCH="$(git branch --show-current)"
+RUN_ID="$(gh run list --repo ChangJu-Ahn/mock-hr-kr --workflow build-images --branch "$BRANCH" --limit 1 --json databaseId -q '.[0].databaseId')"
 gh run watch "$RUN_ID" --repo ChangJu-Ahn/mock-hr-kr --exit-status
 ```
 
