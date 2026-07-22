@@ -166,6 +166,48 @@ class WebConsoleTests(unittest.TestCase):
         emp_id = self.db.list_employee_ids()[0]
         self.assertEqual(self.client.get(f"/employees/{emp_id}").status_code, 200)
 
+    def test_employee_detail_uses_atomic_profile_fields_and_badges(self):
+        emp_id = self.db.hire_employee("상세검증", "D110", "P1")["emp_id"]
+        self.db.log_attendance(emp_id, "2026-07-20", check_in="08:55", check_out="18:10")
+        self.db.enroll_training(emp_id, "C006", enroll_date="2026-07-01")
+        training_id = self.db.list_training_records(emp_id=emp_id)[0]["id"]
+        self.db.complete_training(training_id, status="이수", score=96, complete_date="2026-07-03")
+        self.db.submit_leave_request(
+            emp_id,
+            "연차",
+            "2026-08-03",
+            "2026-08-03",
+            reason="상세페이지검증",
+        )
+        leave_id = self.db.list_leave_requests(emp_id=emp_id, status="신청")[0]["id"]
+        self.db.decide_leave_request(leave_id, "승인", approver_emp_id=emp_id, decided_date="2026-08-01")
+
+        html = self.client.get(f"/employees/{emp_id}").text
+        for label in (
+            "사번", "이름", "부서코드", "부서명", "직급코드", "직급명",
+            "고용형태", "상태", "입사일", "생년월일", "이메일", "연락처",
+            "관리자 사번", "관리자 이름",
+        ):
+            self.assertIn(label, html)
+        for heading in ("과정코드", "과정명", "변경 전", "변경 후"):
+            self.assertIn(heading, html)
+        self.assertIn('class="profile-header"', html)
+        self.assertIn('<dl class="detail-grid">', html)
+        self.assertGreaterEqual(html.count('class="status-badge'), 4)
+
+    def test_employee_detail_appointment_history_uses_grouped_before_after_fallbacks(self):
+        emp_id = self.db.hire_employee("발령상세검증", "D110", "P1")["emp_id"]
+        self.db.create_appointment(emp_id, "휴직", effective_date="2026-03-01", note="상태변경검증")
+
+        html = self.client.get(f"/employees/{emp_id}").text
+        self.assertIn('<th colspan="4" class="group-heading">변경 전</th>', html)
+        self.assertIn('<th colspan="4" class="group-heading">변경 후</th>', html)
+        self.assertRegex(
+            html,
+            r"(?s)>휴직</td>\s*<td>D110</td>\s*<td>인사팀</td>\s*<td>P1</td>\s*<td>사원</td>"
+            r"\s*<td>D110</td>\s*<td>인사팀</td>\s*<td>P1</td>\s*<td>사원</td>\s*<td>상태변경검증</td>",
+        )
+
     def test_successfactors_inspired_shell_is_present(self):
         html = self.client.get("/").text
         self.assertIn('class="shellbar"', html)
@@ -328,6 +370,28 @@ class WebConsoleTests(unittest.TestCase):
         r = self.client.get("/guide")
         self.assertEqual(r.status_code, 200)
         self.assertIn("HR", r.text)
+
+    def test_guide_uses_step_cards_and_preserves_reference_content(self):
+        html = self.client.get("/guide").text
+        self.assertIn('class="guide-steps"', html)
+        self.assertEqual(html.count('class="guide-step__number"'), 5)
+        for text in (
+            "입사", "교육", "연차·휴가", "근태", "인사발령",
+            "REST /api/employees", "MCP submit_leave_request/decide_leave_request/get_leave_balance/list_leave_requests",
+            'href="/api/docs"',
+        ):
+            self.assertIn(text, html)
+
+    def test_profile_and_guide_styles_are_served(self):
+        css = self.client.get("/static/styles.css").text
+        for token in (
+            ".profile-header {",
+            ".profile-avatar {",
+            ".guide-steps {",
+            ".guide-step__number {",
+        ):
+            self.assertIn(token, css)
+
 
 
 if __name__ == "__main__":

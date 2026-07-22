@@ -1,71 +1,171 @@
 {% extends "base.html" %}
+{% from "_ui.html" import empty_row, status_badge %}
 {% block title %}{{ emp.name }} · Mock HR{% endblock %}
 {% block content %}
-<h1>{{ emp.name }} <span class="muted">{{ emp.emp_id }}</span></h1>
+<header class="profile-header" aria-labelledby="employee-profile-title">
+  <div class="profile-avatar" aria-hidden="true">{{ emp.name[:1] if emp.name else '사' }}</div>
+  <div>
+    <p class="page-eyebrow">사원 프로필</p>
+    <h1 id="employee-profile-title">{{ emp.name }}</h1>
+    <p class="page-subtitle">{{ emp.emp_id }} · {{ emp.dept_name or '부서 미지정' }} · {{ emp.position_name or '직급 미지정' }}</p>
+  </div>
+  {{ status_badge(emp.status) }}
+</header>
 <p><a href="/employees">← 사원 목록</a></p>
 
-<section class="panel">
-  <div class="detail-grid">
-    <div><strong>부서</strong><span>{{ emp.dept_name or '' }} ({{ emp.dept_code or '' }})</span></div>
-    <div><strong>직급</strong><span>{{ emp.position_name or '' }}</span></div>
-    <div><strong>고용형태</strong><span>{{ emp.employment_type or '' }}</span></div>
-    <div><strong>상태</strong><span>{{ emp.status or '' }}</span></div>
-    <div><strong>입사일</strong><span>{{ emp.hire_date or '' }}</span></div>
-    <div><strong>생년월일</strong><span>{{ emp.birth_date or '' }}</span></div>
-    <div><strong>이메일</strong><span>{{ emp.email or '' }}</span></div>
-    <div><strong>연락처</strong><span>{{ emp.phone or '' }}</span></div>
-    <div><strong>관리자</strong><span>{{ emp.manager_name or '' }}</span></div>
-  </div>
+<section class="content-card" aria-labelledby="employee-profile-fields-title">
+  <h2 id="employee-profile-fields-title">프로필 상세</h2>
+  <dl class="detail-grid">
+    <div class="detail-item"><dt class="detail-item__label">사번</dt><dd class="detail-item__value business-id">{{ emp.emp_id }}</dd></div>
+    <div class="detail-item"><dt class="detail-item__label">이름</dt><dd class="detail-item__value">{{ emp.name or '—' }}</dd></div>
+    <div class="detail-item"><dt class="detail-item__label">부서코드</dt><dd class="detail-item__value business-id">{{ emp.dept_code or '—' }}</dd></div>
+    <div class="detail-item"><dt class="detail-item__label">부서명</dt><dd class="detail-item__value">{{ emp.dept_name or '—' }}</dd></div>
+    <div class="detail-item"><dt class="detail-item__label">직급코드</dt><dd class="detail-item__value business-id">{{ emp.position_code or '—' }}</dd></div>
+    <div class="detail-item"><dt class="detail-item__label">직급명</dt><dd class="detail-item__value">{{ emp.position_name or '—' }}</dd></div>
+    <div class="detail-item"><dt class="detail-item__label">고용형태</dt><dd class="detail-item__value">{{ emp.employment_type or '—' }}</dd></div>
+    <div class="detail-item"><dt class="detail-item__label">상태</dt><dd class="detail-item__value">{{ status_badge(emp.status) }}</dd></div>
+    <div class="detail-item"><dt class="detail-item__label">입사일</dt><dd class="detail-item__value">{{ emp.hire_date or '—' }}</dd></div>
+    <div class="detail-item"><dt class="detail-item__label">생년월일</dt><dd class="detail-item__value">{{ emp.birth_date or '—' }}</dd></div>
+    <div class="detail-item"><dt class="detail-item__label">이메일</dt><dd class="detail-item__value">{{ emp.email or '—' }}</dd></div>
+    <div class="detail-item"><dt class="detail-item__label">연락처</dt><dd class="detail-item__value">{{ emp.phone or '—' }}</dd></div>
+    <div class="detail-item"><dt class="detail-item__label">관리자 사번</dt><dd class="detail-item__value business-id">{{ emp.manager_emp_id or '—' }}</dd></div>
+    <div class="detail-item"><dt class="detail-item__label">관리자 이름</dt><dd class="detail-item__value">{{ emp.manager_name or '—' }}</dd></div>
+  </dl>
 </section>
 
 <div class="grid2">
-  <section>
-    <h2>연차현황 {% if emp.leave_balance %}({{ emp.leave_balance.year }}){% endif %}</h2>
-    {% if emp.leave_balance %}
-    <table><thead><tr><th>부여</th><th>사용</th><th>잔여</th></tr></thead><tbody>
-      <tr><td>{{ emp.leave_balance.entitled_days }}</td><td>{{ emp.leave_balance.used_days }}</td>
-          <td>{{ emp.leave_balance.remaining_days }}</td></tr>
-    </tbody></table>
-    {% else %}<p class="muted">연차 정보 없음</p>{% endif %}
+  <section class="content-card" aria-labelledby="employee-leave-balance-title">
+    <h2 id="employee-leave-balance-title">연차 현황 {% if emp.leave_balance %}({{ emp.leave_balance.year }}){% endif %}</h2>
+    <div class="table-shell">
+      <table class="data-table">
+        <thead><tr><th>부여</th><th>사용</th><th>잔여</th></tr></thead>
+        <tbody>
+          {% if emp.leave_balance %}
+          <tr>
+            <td>{{ emp.leave_balance.entitled_days }}</td>
+            <td>{{ emp.leave_balance.used_days }}</td>
+            <td>{{ emp.leave_balance.remaining_days }}</td>
+          </tr>
+          {% else %}
+          {{ empty_row(3, '연차 정보 없음') }}
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
   </section>
-  <section>
-    <h2>최근 근태</h2>
-    <table><thead><tr><th>일자</th><th>출근</th><th>퇴근</th><th>근무h</th><th>상태</th></tr></thead><tbody>
-    {% for a in emp.attendance %}<tr><td>{{ a.work_date }}</td><td>{{ a.check_in or '' }}</td>
-        <td>{{ a.check_out or '' }}</td><td>{{ a.work_hours if a.work_hours is not none else '' }}</td>
-        <td>{{ a.status }}</td></tr>
-    {% else %}<tr><td colspan="5">기록 없음</td></tr>{% endfor %}
-    </tbody></table>
+
+  <section class="content-card" aria-labelledby="employee-attendance-title">
+    <h2 id="employee-attendance-title">최근 근태</h2>
+    <div class="table-shell">
+      <table class="data-table">
+        <thead><tr><th>일자</th><th>출근</th><th>퇴근</th><th>근무h</th><th>상태</th></tr></thead>
+        <tbody>
+          {% for a in emp.attendance %}
+          <tr>
+            <td>{{ a.work_date or '—' }}</td>
+            <td>{{ a.check_in or '—' }}</td>
+            <td>{{ a.check_out or '—' }}</td>
+            <td>{{ a.work_hours if a.work_hours is not none else '—' }}</td>
+            <td>{{ status_badge(a.status) }}</td>
+          </tr>
+          {% else %}
+          {{ empty_row(5, '기록 없음') }}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </section>
 </div>
 
-<section>
-  <h2>교육 이수</h2>
-  <table><thead><tr><th>과정</th><th>구분</th><th>신청일</th><th>이수일</th><th>상태</th><th>점수</th></tr></thead><tbody>
-  {% for t in emp.training %}<tr><td>{{ t.course_code }} {{ t.course_name or '' }}</td><td>{{ t.category or '' }}</td>
-      <td>{{ t.enroll_date or '' }}</td><td>{{ t.complete_date or '' }}</td><td>{{ t.status }}</td>
-      <td>{{ t.score if t.score is not none else '' }}</td></tr>
-  {% else %}<tr><td colspan="6">기록 없음</td></tr>{% endfor %}
-  </tbody></table>
+<section class="content-card" aria-labelledby="employee-training-title">
+  <h2 id="employee-training-title">교육 이수</h2>
+  <div class="table-shell">
+    <table class="data-table">
+      <thead>
+        <tr><th>과정코드</th><th>과정명</th><th>구분</th><th>신청일</th><th>이수일</th><th>상태</th><th>점수</th></tr>
+      </thead>
+      <tbody>
+        {% for t in emp.training %}
+        <tr>
+          <td>{{ t.course_code or '—' }}</td>
+          <td>{{ t.course_name or '—' }}</td>
+          <td>{{ t.category or '—' }}</td>
+          <td>{{ t.enroll_date or '—' }}</td>
+          <td>{{ t.complete_date or '—' }}</td>
+          <td>{{ status_badge(t.status) }}</td>
+          <td>{{ t.score if t.score is not none else '—' }}</td>
+        </tr>
+        {% else %}
+        {{ empty_row(7, '기록 없음') }}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 
-<section>
-  <h2>휴가 신청 이력</h2>
-  <table><thead><tr><th>유형</th><th>기간</th><th>일수</th><th>상태</th><th>사유</th></tr></thead><tbody>
-  {% for l in emp.leave_requests %}<tr><td>{{ l.leave_type }}</td><td>{{ l.start_date }} ~ {{ l.end_date }}</td>
-      <td>{{ l.days }}</td><td>{{ l.status }}</td><td>{{ l.reason or '' }}</td></tr>
-  {% else %}<tr><td colspan="5">기록 없음</td></tr>{% endfor %}
-  </tbody></table>
+<section class="content-card" aria-labelledby="employee-leave-history-title">
+  <h2 id="employee-leave-history-title">휴가 신청 이력</h2>
+  <div class="table-shell">
+    <table class="data-table">
+      <thead><tr><th>유형</th><th>기간</th><th>일수</th><th>상태</th><th>사유</th></tr></thead>
+      <tbody>
+        {% for l in emp.leave_requests %}
+        <tr>
+          <td>{{ l.leave_type or '—' }}</td>
+          <td>{{ l.start_date or '—' }} ~ {{ l.end_date or '—' }}</td>
+          <td>{{ l.days if l.days is not none else '—' }}</td>
+          <td>{{ status_badge(l.status) }}</td>
+          <td>{{ l.reason or '—' }}</td>
+        </tr>
+        {% else %}
+        {{ empty_row(5, '기록 없음') }}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 
-<section>
-  <h2>인사발령 이력</h2>
-  <table><thead><tr><th>발령일</th><th>유형</th><th>부서</th><th>직급</th><th>비고</th></tr></thead><tbody>
-  {% for ap in emp.appointments %}<tr><td>{{ ap.effective_date }}</td><td>{{ ap.type }}</td>
-      <td>{{ ap.from_dept or '' }}{% if ap.to_dept %} → {{ ap.to_dept }}{% endif %}</td>
-      <td>{{ ap.from_position or '' }}{% if ap.to_position %} → {{ ap.to_position }}{% endif %}</td>
-      <td>{{ ap.note or '' }}</td></tr>
-  {% else %}<tr><td colspan="5">기록 없음</td></tr>{% endfor %}
-  </tbody></table>
+<section class="content-card" aria-labelledby="employee-appointment-history-title">
+  <h2 id="employee-appointment-history-title">인사발령 이력</h2>
+  <div class="table-shell">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th rowspan="2">발령일</th>
+          <th rowspan="2">유형</th>
+          <th colspan="4" class="group-heading">변경 전</th>
+          <th colspan="4" class="group-heading">변경 후</th>
+          <th rowspan="2">비고</th>
+        </tr>
+        <tr>
+          <th>부서코드</th><th>부서명</th><th>직급코드</th><th>직급명</th>
+          <th>부서코드</th><th>부서명</th><th>직급코드</th><th>직급명</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ap in emp.appointments %}
+        {% set after_dept_code = ap.to_dept or ap.from_dept %}
+        {% set after_dept_name = ap.to_dept_name or ap.from_dept_name %}
+        {% set after_position_code = ap.to_position or ap.from_position %}
+        {% set after_position_name = ap.to_position_name or ap.from_position_name %}
+        <tr>
+          <td>{{ ap.effective_date or '—' }}</td>
+          <td>{{ ap.type or '—' }}</td>
+          <td>{{ ap.from_dept or '—' }}</td>
+          <td>{{ ap.from_dept_name or '—' }}</td>
+          <td>{{ ap.from_position or '—' }}</td>
+          <td>{{ ap.from_position_name or '—' }}</td>
+          <td>{{ after_dept_code or '—' }}</td>
+          <td>{{ after_dept_name or '—' }}</td>
+          <td>{{ after_position_code or '—' }}</td>
+          <td>{{ after_position_name or '—' }}</td>
+          <td>{{ ap.note or '—' }}</td>
+        </tr>
+        {% else %}
+        {{ empty_row(11, '기록 없음') }}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 {% endblock %}

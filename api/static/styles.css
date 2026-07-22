@@ -101,6 +101,59 @@ button.link:hover { background: none; text-decoration: underline; }
 .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .75rem; }
 .detail-grid > div, .detail-item { padding: .75rem; border: 1px solid var(--sap-border); border-radius: .375rem; background: #fff; }
 .detail-item__label, .detail-grid strong { display: block; margin-bottom: .25rem; color: var(--sap-muted); font-size: .75rem; }
+.detail-grid dt, .detail-grid dd { margin: 0; }
+.detail-item__value { color: var(--sap-text); font-weight: 600; }
+.detail-item__value .status-badge { font-weight: 700; }
+.profile-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 1.25rem;
+  background: var(--sap-surface);
+  border: 1px solid var(--sap-border);
+  border-radius: .5rem;
+  box-shadow: var(--shadow-card);
+}
+.profile-header h1 { margin: 0; font-size: 1.75rem; font-weight: 500; }
+.profile-header .status-badge { margin-left: auto; }
+.profile-avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 4rem;
+  height: 4rem;
+  flex: 0 0 4rem;
+  border-radius: 50%;
+  background: var(--sap-blue-soft);
+  color: var(--sap-blue);
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+.guide-steps { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; gap: .75rem; }
+.guide-steps li {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  padding: 1rem;
+  background: var(--sap-surface);
+  border: 1px solid var(--sap-border);
+  border-radius: .5rem;
+  box-shadow: var(--shadow-card);
+}
+.guide-step__number {
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 2rem;
+  border-radius: 50%;
+  background: var(--sap-blue-soft);
+  color: var(--sap-blue);
+  font-weight: 700;
+}
+.guide-steps strong { display: block; margin-bottom: .25rem; }
+.guide-steps p { margin: 0; }
+.guide-steps p + p { margin-top: .4rem; }
 .empty-state { padding: 2rem !important; text-align: center !important; color: var(--sap-muted); }
 .muted { color: var(--sap-muted); }
 .bad { color: var(--sap-negative); font-weight: 600; }
@@ -121,5 +174,8 @@ pre { overflow-x: auto; padding: 1rem; border-radius: .375rem; background: #1d2d
   .work-nav { overflow-x: auto; position: static; }
   .page-shell { padding: 1rem; }
   .attention-grid, .grid2, .grid-2 { grid-template-columns: 1fr; }
+   .profile-header { align-items: flex-start; flex-wrap: wrap; }
+   .profile-header .status-badge { margin-left: 0; }
+   .guide-steps li { flex-direction: column; }
   .shellbar__actions a { display: none; }
 }
