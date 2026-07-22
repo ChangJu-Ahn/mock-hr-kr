@@ -133,6 +133,11 @@ flowchart LR
 
 ### Web console — `/` (all open, no key)
 
+The web console uses a SuccessFactors-inspired hybrid experience: a
+Morning Horizon-style card dashboard for quick actions and attention items,
+with compact administrator workspaces for master and operational records.
+All read-only tables keep identifiers/codes and names in separate columns.
+
 | Page | URL | Actions |
 | --- | --- | --- |
 | Dashboard | `/` | Summary: headcount, org, leave, training, recent actions |
