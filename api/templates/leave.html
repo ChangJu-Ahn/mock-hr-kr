@@ -1,72 +1,139 @@
 {% extends "base.html" %}
-{% block title %}연차·휴가 Leave · Mock HR{% endblock %}
+{% from "_ui.html" import page_header, status_badge, empty_row %}
+{% block title %}연차·휴가 관리 · Mock HR{% endblock %}
 {% block content %}
-<h1>연차·휴가 Leave</h1>
+{{ page_header('연차·휴가 관리', '휴가 신청, 승인 처리, 연차 잔여 현황을 한 번에 관리합니다.', '근태 운영') }}
+<p class="muted">반차는 0.5일로 계산되며 종료일 미입력 시 시작일과 동일하게 처리됩니다.</p>
 
-<section class="panel">
-  <h2>휴가 신청 Submit request</h2>
-  <form method="post" action="/leave/submit" class="row">
-    <label>사원
-      <select name="emp_id" required>
-        {% for e in employees %}<option value="{{ e.emp_id }}">{{ e.emp_id }} {{ e.name }}</option>{% endfor %}
-      </select></label>
-    <label>유형
-      <select name="leave_type" required>
-        {% for t in leave_types %}<option>{{ t }}</option>{% endfor %}
-      </select></label>
-    <label>시작일 <input type="date" name="start_date" required></label>
-    <label>종료일 <input type="date" name="end_date"></label>
-    <label>사유 <input name="reason"></label>
-    <button type="submit">신청</button>
-  </form>
-  <p class="muted">반차는 0.5일로 계산됩니다. 종료일 미입력 시 시작일과 동일 처리.</p>
-</section>
+<details class="action-panel" id="leave-action">
+  <summary>＋ 휴가 신청</summary>
+  <div class="action-panel__body">
+    <form method="post" action="/leave/submit" class="row">
+      <label>사원
+        <select name="emp_id" required>
+          {% for e in employees %}<option value="{{ e.emp_id }}">{{ e.emp_id }} · {{ e.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>유형
+        <select name="leave_type" required>
+          {% for t in leave_types %}<option>{{ t }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>시작일 <input type="date" name="start_date" required></label>
+      <label>종료일 <input type="date" name="end_date"></label>
+      <label>사유 <input name="reason"></label>
+      <button type="submit">신청</button>
+    </form>
+  </div>
+</details>
 
-<form method="get" action="/leave" class="row filters">
+<form method="get" action="/leave" class="filter-bar">
   <label>사원
-    <select name="emp_id"><option value="">전체</option>
-      {% for e in employees %}<option value="{{ e.emp_id }}" {% if filters.emp_id==e.emp_id %}selected{% endif %}>{{ e.emp_id }} {{ e.name }}</option>{% endfor %}
-    </select></label>
+    <select name="emp_id">
+      <option value="">전체</option>
+      {% for e in employees %}<option value="{{ e.emp_id }}" {% if filters.emp_id == e.emp_id %}selected{% endif %}>{{ e.emp_id }} · {{ e.name }}</option>{% endfor %}
+    </select>
+  </label>
   <label>상태
-    <select name="status_filter"><option value="">전체</option>
-      <option {% if filters.status_filter=='신청' %}selected{% endif %}>신청</option>
-      <option {% if filters.status_filter=='승인' %}selected{% endif %}>승인</option>
-      <option {% if filters.status_filter=='반려' %}selected{% endif %}>반려</option>
-      <option {% if filters.status_filter=='취소' %}selected{% endif %}>취소</option>
-    </select></label>
-  <button type="submit">필터</button>
+    <select name="status_filter">
+      <option value="">전체</option>
+      {% for value in ['신청', '승인', '반려', '취소'] %}<option {% if filters.status_filter == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+    </select>
+  </label>
+  <button type="submit">조회</button>
 </form>
 
-<section>
-  <h2>휴가 신청 목록 Requests</h2>
-  <table><thead><tr><th>ID</th><th>사원</th><th>유형</th><th>기간</th><th>일수</th><th>상태</th>
-    <th>사유</th><th>승인자</th><th>처리</th></tr></thead><tbody>
-  {% for r in requests %}<tr>
-    <td>{{ r.id }}</td><td>{{ r.emp_id }} {{ r.emp_name or '' }}</td><td>{{ r.leave_type }}</td>
-    <td>{{ r.start_date }} ~ {{ r.end_date }}</td><td>{{ r.days }}</td><td>{{ r.status }}</td>
-    <td>{{ r.reason or '' }}</td><td>{{ r.approver_name or '' }}</td>
-    <td>
-      {% if r.status == '신청' %}
-      <form method="post" action="/leave/{{ r.id }}/decide" class="row" style="gap:6px">
-        <select name="approver_emp_id" style="max-width:130px"><option value="">승인자</option>
-          {% for e in employees %}<option value="{{ e.emp_id }}">{{ e.name }}</option>{% endfor %}
-        </select>
-        <button type="submit" name="decision" value="승인">승인</button>
-        <button type="submit" name="decision" value="반려">반려</button>
-      </form>
-      {% else %}—{% endif %}
-    </td></tr>
-  {% else %}<tr><td colspan="9">신청 없음</td></tr>{% endfor %}
-  </tbody></table>
+<section class="content-card" aria-labelledby="leave-request-title">
+  <h2 id="leave-request-title">휴가 신청 목록</h2>
+  <div class="table-shell">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>사번</th>
+          <th>이름</th>
+          <th>부서코드</th>
+          <th>부서명</th>
+          <th>유형</th>
+          <th>시작일</th>
+          <th>종료일</th>
+          <th>일수</th>
+          <th>상태</th>
+          <th>사유</th>
+          <th>승인자 사번</th>
+          <th>승인자 이름</th>
+          <th>처리</th>
+          <th>ID</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in requests %}
+        <tr>
+          <td class="business-id">{{ r.emp_id }}</td>
+          <td>{{ r.emp_name or '—' }}</td>
+          <td>{{ r.dept_code or '—' }}</td>
+          <td>{{ r.dept_name or '—' }}</td>
+          <td>{{ r.leave_type }}</td>
+          <td>{{ r.start_date }}</td>
+          <td>{{ r.end_date }}</td>
+          <td>{{ r.days }}</td>
+          <td>{{ status_badge(r.status) }}</td>
+          <td>{{ r.reason or '—' }}</td>
+          <td>{{ r.approver_emp_id or '—' }}</td>
+          <td>{{ r.approver_name or '—' }}</td>
+          <td>
+            {% if r.status == '신청' %}
+            <form method="post" action="/leave/{{ r.id }}/decide" class="row" style="gap:6px">
+              <select name="approver_emp_id" style="max-width:180px"><option value="">승인자</option>
+                {% for e in employees %}<option value="{{ e.emp_id }}">{{ e.emp_id }} · {{ e.name }}</option>{% endfor %}
+              </select>
+              <button type="submit" name="decision" value="승인">승인</button>
+              <button type="submit" name="decision" value="반려">반려</button>
+            </form>
+            {% else %}—{% endif %}
+          </td>
+          <td class="mono">{{ r.id }}</td>
+        </tr>
+        {% else %}
+        {{ empty_row(14, '휴가 신청 기록이 없습니다.') }}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 
-<section>
-  <h2>연차현황 Leave balances</h2>
-  <table><thead><tr><th>사원</th><th>부서</th><th>연도</th><th>부여</th><th>사용</th><th>잔여</th></tr></thead><tbody>
-  {% for b in balances %}<tr><td>{{ b.emp_id }} {{ b.emp_name or '' }}</td><td>{{ b.dept_name or '' }}</td>
-      <td>{{ b.year }}</td><td>{{ b.entitled_days }}</td><td>{{ b.used_days }}</td>
-      <td>{{ b.remaining_days }}</td></tr>
-  {% else %}<tr><td colspan="6">연차 정보 없음</td></tr>{% endfor %}
-  </tbody></table>
+<section class="content-card" aria-labelledby="leave-balance-title">
+  <h2 id="leave-balance-title">연차 현황</h2>
+  <div class="table-shell">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>사번</th>
+          <th>이름</th>
+          <th>부서코드</th>
+          <th>부서명</th>
+          <th>연도</th>
+          <th>부여</th>
+          <th>사용</th>
+          <th>잔여</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for b in balances %}
+        <tr>
+          <td class="business-id">{{ b.emp_id }}</td>
+          <td>{{ b.emp_name or '—' }}</td>
+          <td>{{ b.dept_code or '—' }}</td>
+          <td>{{ b.dept_name or '—' }}</td>
+          <td>{{ b.year }}</td>
+          <td>{{ b.entitled_days }}</td>
+          <td>{{ b.used_days }}</td>
+          <td>{{ b.remaining_days }}</td>
+        </tr>
+        {% else %}
+        {{ empty_row(8, '연차 현황이 없습니다.') }}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 {% endblock %}

@@ -1,68 +1,128 @@
 {% extends "base.html" %}
-{% block title %}교육 Training · Mock HR{% endblock %}
+{% from "_ui.html" import page_header, status_badge, empty_row %}
+{% block title %}교육 관리 · Mock HR{% endblock %}
 {% block content %}
-<h1>교육 Training</h1>
+{{ page_header('교육 관리', '교육과정과 이수 현황을 한 화면에서 확인하고 수강 신청·이수 처리를 진행합니다.', '인재 개발') }}
 <p class="muted">법정필수 교육 이수율: {{ completion.completed }}/{{ completion.total }} ({{ completion.rate }}%)</p>
 
-<section class="panel">
-  <h2>수강신청 Enroll</h2>
-  <form method="post" action="/courses/enroll" class="row">
-    <label>사원
-      <select name="emp_id" required>
-        {% for e in employees %}<option value="{{ e.emp_id }}">{{ e.emp_id }} {{ e.name }}</option>{% endfor %}
-      </select></label>
-    <label>과정
-      <select name="course_code" required>
-        {% for c in courses %}<option value="{{ c.course_code }}">{{ c.course_code }} — {{ c.course_name }}</option>{% endfor %}
-      </select></label>
-    <label>신청일 <input type="date" name="enroll_date"></label>
-    <button type="submit">수강신청</button>
-  </form>
+<details class="action-panel" id="training-action">
+  <summary>＋ 수강 신청</summary>
+  <div class="action-panel__body">
+    <form method="post" action="/courses/enroll" class="row">
+      <label>사원
+        <select name="emp_id" required>
+          {% for e in employees %}<option value="{{ e.emp_id }}">{{ e.emp_id }} · {{ e.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>과정
+        <select name="course_code" required>
+          {% for c in courses %}<option value="{{ c.course_code }}">{{ c.course_code }} · {{ c.course_name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>신청일 <input type="date" name="enroll_date"></label>
+      <button type="submit">수강신청</button>
+    </form>
+  </div>
+</details>
+
+<section class="content-card" aria-labelledby="course-catalog-title">
+  <h2 id="course-catalog-title">교육과정</h2>
+  <div class="table-shell">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>코드</th>
+          <th>과정명</th>
+          <th>구분</th>
+          <th>방식</th>
+          <th>시간</th>
+          <th>정원</th>
+          <th>필수</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in rows %}
+        <tr>
+          <td class="business-id">{{ c.course_code }}</td>
+          <td>{{ c.course_name }}</td>
+          <td>{{ c.category }}</td>
+          <td>{{ c.delivery }}</td>
+          <td>{{ c.hours }}</td>
+          <td>{{ c.capacity }}</td>
+          <td>{% if c.is_mandatory %}필수{% else %}선택{% endif %}</td>
+        </tr>
+        {% else %}
+        {{ empty_row(7, '등록된 교육과정이 없습니다.') }}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 
-<section>
-  <h2>교육과정 Courses</h2>
-  <table><thead><tr><th>코드</th><th>과정명</th><th>구분</th><th>방식</th><th>시간</th><th>정원</th><th>필수</th></tr></thead><tbody>
-  {% for c in rows %}<tr><td>{{ c.course_code }}</td><td>{{ c.course_name }}</td><td>{{ c.category }}</td>
-      <td>{{ c.delivery }}</td><td>{{ c.hours }}</td><td>{{ c.capacity }}</td>
-      <td>{% if c.is_mandatory %}필수{% else %}선택{% endif %}</td></tr>
-  {% else %}<tr><td colspan="7">과정 없음</td></tr>{% endfor %}
-  </tbody></table>
-</section>
-
-<form method="get" action="/courses" class="row filters">
+<form method="get" action="/courses" class="filter-bar">
+  <input type="hidden" name="category" value="{{ filters.category }}">
   <label>과정
-    <select name="course_code"><option value="">전체</option>
-      {% for c in courses %}<option value="{{ c.course_code }}" {% if filters.course_code==c.course_code %}selected{% endif %}>{{ c.course_name }}</option>{% endfor %}
-    </select></label>
+    <select name="course_code">
+      <option value="">전체</option>
+      {% for c in courses %}<option value="{{ c.course_code }}" {% if filters.course_code == c.course_code %}selected{% endif %}>{{ c.course_code }} · {{ c.course_name }}</option>{% endfor %}
+    </select>
+  </label>
   <label>상태
-    <select name="status_filter"><option value="">전체</option>
-      <option {% if filters.status_filter=='수강중' %}selected{% endif %}>수강중</option>
-      <option {% if filters.status_filter=='이수' %}selected{% endif %}>이수</option>
-      <option {% if filters.status_filter=='미이수' %}selected{% endif %}>미이수</option>
-    </select></label>
-  <button type="submit">필터</button>
+    <select name="status_filter">
+      <option value="">전체</option>
+      {% for value in ['수강중', '이수', '미이수'] %}<option {% if filters.status_filter == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+    </select>
+  </label>
+  <button type="submit">조회</button>
 </form>
 
-<section>
-  <h2>교육 이수 현황 Training records</h2>
-  <table><thead><tr><th>ID</th><th>사원</th><th>과정</th><th>구분</th><th>신청일</th><th>이수일</th>
-    <th>상태</th><th>점수</th><th>처리</th></tr></thead><tbody>
-  {% for t in records %}<tr>
-    <td>{{ t.id }}</td><td>{{ t.emp_id }} {{ t.emp_name or '' }}</td>
-    <td>{{ t.course_code }} {{ t.course_name or '' }}</td><td>{{ t.category or '' }}</td>
-    <td>{{ t.enroll_date or '' }}</td><td>{{ t.complete_date or '' }}</td><td>{{ t.status }}</td>
-    <td>{{ t.score if t.score is not none else '' }}</td>
-    <td>
-      {% if t.status == '수강중' %}
-      <form method="post" action="/courses/{{ t.id }}/complete" class="row" style="gap:6px">
-        <select name="status_value"><option>이수</option><option>미이수</option></select>
-        <input type="number" name="score" placeholder="점수" style="width:80px" step="0.1">
-        <button type="submit">처리</button>
-      </form>
-      {% else %}—{% endif %}
-    </td></tr>
-  {% else %}<tr><td colspan="9">기록 없음</td></tr>{% endfor %}
-  </tbody></table>
+<section class="content-card" aria-labelledby="training-record-title">
+  <h2 id="training-record-title">교육 이수 현황</h2>
+  <div class="table-shell">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>사번</th>
+          <th>이름</th>
+          <th>과정코드</th>
+          <th>과정명</th>
+          <th>구분</th>
+          <th>신청일</th>
+          <th>이수일</th>
+          <th>상태</th>
+          <th>점수</th>
+          <th>처리</th>
+          <th>ID</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in records %}
+        <tr>
+          <td class="business-id">{{ t.emp_id }}</td>
+          <td>{{ t.emp_name or '—' }}</td>
+          <td>{{ t.course_code }}</td>
+          <td>{{ t.course_name or '—' }}</td>
+          <td>{{ t.category or '—' }}</td>
+          <td>{{ t.enroll_date or '—' }}</td>
+          <td>{{ t.complete_date or '—' }}</td>
+          <td>{{ status_badge(t.status) }}</td>
+          <td>{{ t.score if t.score is not none else '—' }}</td>
+          <td>
+            {% if t.status == '수강중' %}
+            <form method="post" action="/courses/{{ t.id }}/complete" class="row" style="gap:6px">
+              <select name="status_value"><option>이수</option><option>미이수</option></select>
+              <input type="number" name="score" placeholder="점수" style="width:80px" step="0.1">
+              <button type="submit">처리</button>
+            </form>
+            {% else %}—{% endif %}
+          </td>
+          <td class="mono">{{ t.id }}</td>
+        </tr>
+        {% else %}
+        {{ empty_row(11, '조건에 맞는 교육 이수 기록이 없습니다.') }}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 {% endblock %}

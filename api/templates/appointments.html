@@ -1,53 +1,105 @@
 {% extends "base.html" %}
-{% block title %}인사발령 Appointments · Mock HR{% endblock %}
+{% from "_ui.html" import page_header, empty_row %}
+{% block title %}인사발령 관리 · Mock HR{% endblock %}
 {% block content %}
-<h1>인사발령 Appointments</h1>
+{{ page_header('인사발령 관리', '승진·부서이동·재직 상태 변경 발령을 등록하고 이력을 비교형 표로 확인합니다.', '인사 운영') }}
+<p class="muted">승진은 직급 변경, 부서이동은 부서 변경, 휴직·복직·퇴직은 재직 상태 변경을 즉시 반영합니다.</p>
 
-<section class="panel">
-  <h2>발령 등록 Create appointment</h2>
-  <form method="post" action="/appointments/create" class="row">
-    <label>사원
-      <select name="emp_id" required>
-        {% for e in employees %}<option value="{{ e.emp_id }}">{{ e.emp_id }} {{ e.name }}</option>{% endfor %}
-      </select></label>
-    <label>유형
-      <select name="type" required>
-        {% for t in types %}<option>{{ t }}</option>{% endfor %}
-      </select></label>
-    <label>발령일 <input type="date" name="effective_date"></label>
-    <label>부서(부서이동)
-      <select name="to_dept"><option value="">(해당없음)</option>
-        {% for d in departments %}<option value="{{ d.dept_code }}">{{ d.dept_code }} — {{ d.dept_name }}</option>{% endfor %}
-      </select></label>
-    <label>직급(승진)
-      <select name="to_position"><option value="">(해당없음)</option>
-        {% for p in positions %}<option value="{{ p.position_code }}">{{ p.position_name }}</option>{% endfor %}
-      </select></label>
-    <label>비고 <input name="note"></label>
-    <button type="submit">발령</button>
-  </form>
-  <p class="muted">승진→직급 변경, 부서이동→부서 변경, 휴직/복직/퇴직→재직상태 변경이 사원정보에 즉시 반영됩니다.</p>
-</section>
+<details class="action-panel" id="appointment-action">
+  <summary>＋ 발령 등록</summary>
+  <div class="action-panel__body">
+    <form method="post" action="/appointments/create" class="row">
+      <label>사원
+        <select name="emp_id" required>
+          {% for e in employees %}<option value="{{ e.emp_id }}">{{ e.emp_id }} · {{ e.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>유형
+        <select name="type" required>
+          {% for t in types %}<option>{{ t }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>발령일 <input type="date" name="effective_date"></label>
+      <label>부서(부서이동)
+        <select name="to_dept"><option value="">(해당없음)</option>
+          {% for d in departments %}<option value="{{ d.dept_code }}">{{ d.dept_code }} · {{ d.dept_name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>직급(승진)
+        <select name="to_position"><option value="">(해당없음)</option>
+          {% for p in positions %}<option value="{{ p.position_code }}">{{ p.position_code }} · {{ p.position_name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>비고 <input name="note"></label>
+      <button type="submit">발령</button>
+    </form>
+  </div>
+</details>
 
-<form method="get" action="/appointments" class="row filters">
+<form method="get" action="/appointments" class="filter-bar">
   <label>사원
-    <select name="emp_id"><option value="">전체</option>
-      {% for e in employees %}<option value="{{ e.emp_id }}" {% if filters.emp_id==e.emp_id %}selected{% endif %}>{{ e.emp_id }} {{ e.name }}</option>{% endfor %}
-    </select></label>
+    <select name="emp_id">
+      <option value="">전체</option>
+      {% for e in employees %}<option value="{{ e.emp_id }}" {% if filters.emp_id == e.emp_id %}selected{% endif %}>{{ e.emp_id }} · {{ e.name }}</option>{% endfor %}
+    </select>
+  </label>
   <label>유형
-    <select name="type"><option value="">전체</option>
-      <option {% if filters.type=='입사' %}selected{% endif %}>입사</option>
-      {% for t in types %}<option {% if filters.type==t %}selected{% endif %}>{{ t }}</option>{% endfor %}
-    </select></label>
-  <button type="submit">필터</button>
+    <select name="type">
+      <option value="">전체</option>
+      <option {% if filters.type == '입사' %}selected{% endif %}>입사</option>
+      {% for value in types %}<option {% if filters.type == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+    </select>
+  </label>
+  <button type="submit">조회</button>
 </form>
 
-<table><thead><tr><th>ID</th><th>사원</th><th>발령일</th><th>유형</th><th>부서</th><th>직급</th><th>비고</th></tr></thead><tbody>
-{% for r in rows %}<tr><td>{{ r.id }}</td><td>{{ r.emp_id }} {{ r.emp_name or '' }}</td>
-    <td>{{ r.effective_date }}</td><td>{{ r.type }}</td>
-    <td>{{ r.from_dept or '' }}{% if r.to_dept %} → {{ r.to_dept }}{% endif %}</td>
-    <td>{{ r.from_position or '' }}{% if r.to_position %} → {{ r.to_position }}{% endif %}</td>
-    <td>{{ r.note or '' }}</td></tr>
-{% else %}<tr><td colspan="7">발령 기록 없음</td></tr>{% endfor %}
-</tbody></table>
+<section class="content-card" aria-labelledby="appointment-history-title">
+  <h2 id="appointment-history-title">발령 이력</h2>
+  <div class="table-shell">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th rowspan="2" class="sticky-id">사번</th>
+          <th rowspan="2" class="sticky-name">이름</th>
+          <th rowspan="2">발령일</th>
+          <th rowspan="2">유형</th>
+          <th colspan="4" class="group-heading">변경 전</th>
+          <th colspan="4" class="group-heading">변경 후</th>
+          <th rowspan="2">비고</th>
+          <th rowspan="2">ID</th>
+        </tr>
+        <tr>
+          <th>부서코드</th><th>부서명</th><th>직급코드</th><th>직급명</th>
+          <th>부서코드</th><th>부서명</th><th>직급코드</th><th>직급명</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        {% set after_dept_code = r.to_dept or r.from_dept %}
+        {% set after_dept_name = r.to_dept_name or r.from_dept_name %}
+        {% set after_position_code = r.to_position or r.from_position %}
+        {% set after_position_name = r.to_position_name or r.from_position_name %}
+        <tr>
+          <td class="sticky-id business-id">{{ r.emp_id }}</td>
+          <td class="sticky-name">{{ r.emp_name or '—' }}</td>
+          <td>{{ r.effective_date }}</td>
+          <td>{{ r.type }}</td>
+          <td>{{ r.from_dept or '—' }}</td>
+          <td>{{ r.from_dept_name or '—' }}</td>
+          <td>{{ r.from_position or '—' }}</td>
+          <td>{{ r.from_position_name or '—' }}</td>
+          <td>{{ after_dept_code or '—' }}</td>
+          <td>{{ after_dept_name or '—' }}</td>
+          <td>{{ after_position_code or '—' }}</td>
+          <td>{{ after_position_name or '—' }}</td>
+          <td>{{ r.note or '—' }}</td>
+          <td class="mono">{{ r.id }}</td>
+        </tr>
+        {% else %}
+        {{ empty_row(14, '인사발령 기록이 없습니다.') }}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
 {% endblock %}

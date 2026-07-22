@@ -228,6 +228,49 @@ class WebConsoleTests(unittest.TestCase):
         self.assertIn("직급 관리", html)
         self.assertIn('class="table-shell"', html)
 
+    def test_training_workspace_uses_atomic_employee_and_course_columns(self):
+        html = self.client.get("/courses").text
+        for heading in ("사번", "이름", "과정코드", "과정명"):
+            self.assertIn(heading, html)
+        self.assertIn('id="training-action"', html)
+        self.assertIn(" · ", html)
+
+    def test_leave_workspace_splits_employee_department_and_approver_columns(self):
+        html = self.client.get("/leave").text
+        for heading in (
+            "사번", "이름", "부서코드", "부서명",
+            "승인자 사번", "승인자 이름",
+        ):
+            self.assertIn(heading, html)
+        self.assertIn('id="leave-action"', html)
+        self.assertIn('class="status-badge', html)
+
+    def test_attendance_workspace_splits_employee_and_department_columns(self):
+        html = self.client.get("/attendance").text
+        for heading in ("사번", "이름", "부서코드", "부서명"):
+            self.assertIn(heading, html)
+        self.assertIn('id="attendance-action"', html)
+        self.assertIn('class="status-badge', html)
+
+    def test_appointment_workspace_uses_grouped_before_after_columns(self):
+        emp_id = self.db.hire_employee("발령화면검증", "D110", "P1")["emp_id"]
+        self.db.create_appointment(emp_id, "휴직", note="상태변경검증")
+        html = self.client.get("/appointments").text
+        self.assertIn("변경 전", html)
+        self.assertIn("변경 후", html)
+        self.assertGreaterEqual(html.count("부서코드"), 2)
+        self.assertGreaterEqual(html.count("직급명"), 2)
+        self.assertIn('id="appointment-action"', html)
+        self.assertRegex(
+            html,
+            rf"(?s)>{emp_id}</td>\s*<td[^>]*>발령화면검증</td>.*?<td>D110</td>\s*<td>인사팀</td>\s*<td>P1</td>\s*<td>사원</td>\s*<td>D110</td>\s*<td>인사팀</td>\s*<td>P1</td>\s*<td>사원</td>",
+        )
+
+    def test_appointment_filter_preserves_hire_option_and_selected_state(self):
+        html = self.client.get("/appointments", params={"type": "입사"}).text
+        self.assertIn('<option value="">전체</option>', html)
+        self.assertIn('<option selected>입사</option>', html)
+
     def test_hire_form(self):
         before = len(self.db.list_employee_ids())
         r = self.client.post("/employees/hire",
