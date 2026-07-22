@@ -1,9 +1,39 @@
 import os
+import re
 import unittest
+from html.parser import HTMLParser
 
 from fastapi.testclient import TestClient
 
 KEY = {"X-API-Key": "changjuahn"}
+
+
+class TableShellParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self._div_stack: list[bool] = []
+        self.shell_depth = 0
+        self.shell_count = 0
+        self.table_count = 0
+        self.table_shell_depths: list[int] = []
+
+    def handle_starttag(self, tag, attrs):
+        attrs_map = dict(attrs)
+        classes = attrs_map.get("class", "").split()
+        is_table_shell = tag == "div" and "table-shell" in classes
+        if tag == "div":
+            self._div_stack.append(is_table_shell)
+            if is_table_shell:
+                self.shell_depth += 1
+                self.shell_count += 1
+        elif tag == "table":
+            self.table_count += 1
+            self.table_shell_depths.append(self.shell_depth)
+
+    def handle_endtag(self, tag):
+        if tag == "div" and self._div_stack:
+            if self._div_stack.pop():
+                self.shell_depth -= 1
 
 
 class RestApiTests(unittest.TestCase):
@@ -157,6 +187,15 @@ class WebConsoleTests(unittest.TestCase):
             if os.path.exists(path):
                 os.remove(path)
 
+    def _assert_single_table_shell_wrapper(self, path: str):
+        html = self.client.get(path).text
+        parser = TableShellParser()
+        parser.feed(html)
+        parser.close()
+        self.assertGreater(parser.table_count, 0, path)
+        self.assertEqual(parser.shell_count, parser.table_count, path)
+        self.assertEqual(parser.table_shell_depths, [1] * parser.table_count, path)
+
     def test_all_pages_render(self):
         for path in ("/", "/employees", "/departments", "/positions", "/courses",
                      "/leave", "/attendance", "/appointments", "/guide"):
@@ -217,13 +256,20 @@ class WebConsoleTests(unittest.TestCase):
         self.assertIn('aria-label="업무 메뉴"', html)
         self.assertIn('id="main-content"', html)
 
-    def test_horizon_design_tokens_are_served(self):
+    def test_horizon_design_tokens_and_focus_rules_are_served(self):
         css = self.client.get("/static/styles.css")
         self.assertEqual(css.status_code, 200)
         self.assertIn("--sap-blue: #0a6ed1", css.text)
-        self.assertIn(".status-badge", css.text)
-        self.assertIn(".table-shell", css.text)
-        self.assertRegex(css.text, r"\.content-card,\s*section\s*\{[^}]*overflow-x:\s*auto;")
+        self.assertIn("--sap-info: #0857a8;", css.text)
+        self.assertIn(".grid2 .data-table { min-width: 0; }", css.text)
+        self.assertRegex(css.text, r"\.work-nav summary\[aria-current=\"page\"\]\s*\{[^}]*border-bottom-color:\s*var\(--sap-blue\);")
+        self.assertNotRegex(css.text, r"\.content-card,\s*section\s*\{[^}]*overflow-x:")
+        self.assertRegex(css.text, r"\.table-shell\s*\{[^}]*overflow-x:\s*auto;")
+        self.assertRegex(css.text, r"input:focus,\s*select:focus\s*\{[^}]*outline:\s*2px solid var\(--sap-blue\);")
+        self.assertRegex(
+            css.text,
+            r"button:focus-visible,\s*\.button:focus-visible,\s*summary:focus-visible,\s*a:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--sap-blue\);",
+        )
 
     def test_dashboard_uses_hybrid_home_layout(self):
         html = self.client.get("/").text
@@ -269,6 +315,42 @@ class WebConsoleTests(unittest.TestCase):
         html = self.client.get("/positions").text
         self.assertIn("직급 관리", html)
         self.assertIn('class="table-shell"', html)
+
+    def test_grouped_org_nav_marks_departments_and_positions_current(self):
+        for path in ("/departments", "/positions"):
+            html = self.client.get(path).text
+            self.assertIn('<summary aria-current="page">조직</summary>', html, path)
+            self.assertNotIn('<summary aria-current="page">휴가·근태</summary>', html, path)
+
+    def test_grouped_leave_nav_marks_leave_and_attendance_current(self):
+        for path in ("/leave", "/attendance"):
+            html = self.client.get(path).text
+            self.assertIn('<summary aria-current="page">휴가·근태</summary>', html, path)
+            self.assertNotIn('<summary aria-current="page">조직</summary>', html, path)
+
+    def test_status_badge_macro_maps_attendance_leave_to_info_tone(self):
+        from api.web import templates
+
+        html = templates.env.from_string(
+            '{% from "_ui.html" import status_badge %}{{ status_badge("휴가") }}'
+        ).render()
+        self.assertIn("status-badge--info", html)
+
+    def test_all_rendered_tables_have_exactly_one_table_shell_wrapper(self):
+        emp_id = self.db.list_employee_ids()[0]
+        for path in (
+            "/",
+            "/employees",
+            f"/employees/{emp_id}",
+            "/departments",
+            "/positions",
+            "/courses",
+            "/leave",
+            "/attendance",
+            "/appointments",
+            "/guide",
+        ):
+            self._assert_single_table_shell_wrapper(path)
 
     def test_training_workspace_uses_atomic_employee_and_course_columns(self):
         html = self.client.get("/courses").text

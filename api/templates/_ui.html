@@ -10,7 +10,7 @@
 
 {% macro status_badge(value) -%}
   {% set positive = ['재직', '승인', '이수', '정상', '필수'] %}
-  {% set info = ['신청', '수강중', '재택'] %}
+  {% set info = ['신청', '수강중', '재택', '휴가'] %}
   {% set warning = ['휴직', '지각', '조퇴'] %}
   {% set negative = ['반려', '퇴직', '미이수', '결근', '취소'] %}
   {% if value in positive %}{% set tone = 'positive' %}

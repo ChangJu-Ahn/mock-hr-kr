@@ -29,12 +29,12 @@
     <a href="/" {% if request.url.path == '/' %}aria-current="page"{% endif %}>홈</a>
     <a href="/employees" {% if request.url.path.startswith('/employees') %}aria-current="page"{% endif %}>사원</a>
     <details>
-      <summary>조직</summary>
+      <summary {% if request.url.path in ['/departments', '/positions'] %}aria-current="page"{% endif %}>조직</summary>
       <div class="nav-popover"><a href="/departments">부서</a><a href="/positions">직급</a></div>
     </details>
     <a href="/courses" {% if request.url.path == '/courses' %}aria-current="page"{% endif %}>교육</a>
     <details>
-      <summary>휴가·근태</summary>
+      <summary {% if request.url.path in ['/leave', '/attendance'] %}aria-current="page"{% endif %}>휴가·근태</summary>
       <div class="nav-popover"><a href="/leave">연차·휴가</a><a href="/attendance">근태</a></div>
     </details>
     <a href="/appointments" {% if request.url.path == '/appointments' %}aria-current="page"{% endif %}>인사관리</a>
