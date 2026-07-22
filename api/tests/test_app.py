@@ -371,9 +371,10 @@ class WebConsoleTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn("HR", r.text)
 
-    def test_guide_uses_step_cards_and_preserves_reference_content(self):
+    def test_guide_uses_step_cards(self):
         html = self.client.get("/guide").text
         self.assertIn('class="guide-steps"', html)
+        self.assertIn('<ol class="guide-steps" role="list"', html)
         self.assertEqual(html.count('class="guide-step__number"'), 5)
         for text in (
             "입사", "교육", "연차·휴가", "근태", "인사발령",
