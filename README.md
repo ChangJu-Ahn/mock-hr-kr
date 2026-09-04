@@ -10,7 +10,12 @@ is exposed through **three surfaces**:
 | --- | --- | --- | --- |
 | **Web console** | Human | `/` | All HR functions (view + input) + dashboard |
 | **REST API** | Agent / key | `/api` (docs: `/api/docs`) | Employee · Department · Position · Course · Training · Appointment |
-| **MCP server** | Agent / key | `/mcp` (streamable HTTP) | Attendance · Leave (+ employee lookup) |
+| **MCP server** | Agent / key | `/mcp` (docs: `/mcp-docs`) | Attendance · Leave (+ employee lookup) |
+
+Both agent surfaces are documented in the console: REST through OpenAPI at
+**`/api/docs`**, MCP through **`/mcp-docs`** — a reference page generated from
+the live `FastMCP` server (tool schemas, capabilities, client config), so it can
+never drift from what `tools/list` actually returns.
 
 > **MVP / demo only.** The database is **ephemeral** and **re-seeded on every
 > cold start**, so every demo run gets a fresh, identical HR snapshot. A single
@@ -29,8 +34,8 @@ at `/data`, holding `hr.db`.
 flowchart LR
     client([Browser / Agent]) -->|HTTPS| ingress[ACA ingress :443]
     ingress -->|:8080| proxy[proxy: Caddy]
-    proxy -->|/mcp*| mcp[mcp: MCP server :8001]
-    proxy -->|/* | api[api: FastAPI web + REST :8000]
+    proxy -->|/mcp, /mcp/*| mcp[mcp: MCP server :8001]
+    proxy -->|/mcp-docs, /* | api[api: FastAPI web + REST :8000]
     seed[[init: python -m hr_core.seed]] -. writes .-> db[( /data/hr.db\nEmptyDir )]
     api <--> db
     mcp <--> db
@@ -39,9 +44,9 @@ flowchart LR
 | Container | Image | Role |
 | --- | --- | --- |
 | **seed** (init) | `mock-hr-app` | Runs `python -m hr_core.seed` once before app containers start; exits |
-| **api** | `mock-hr-app` | FastAPI/Uvicorn on `:8000` — web console (`/`) + REST (`/api`) |
+| **api** | `mock-hr-app` | FastAPI/Uvicorn on `:8000` — web console (`/`) + REST (`/api`) + MCP reference (`/mcp-docs`) |
 | **mcp** | `mock-hr-app` | MCP streamable HTTP on `:8001` at `/mcp` |
-| **proxy** | `mock-hr-proxy` | Caddy on `:8080` — single external ingress, routes `/mcp*` → mcp, `/*` → api |
+| **proxy** | `mock-hr-proxy` | Caddy on `:8080` — single external ingress, routes `/mcp-docs*` → api, `/mcp`+`/mcp/*` → mcp, `/*` → api |
 
 Two public GHCR images are built by `.github/workflows/images.yml`:
 `ghcr.io/changju-ahn/mock-hr-app` and `ghcr.io/changju-ahn/mock-hr-proxy`.
@@ -150,6 +155,7 @@ All read-only tables keep identifiers/codes and names in separate columns.
 | Attendance | `/attendance` | List + filter; log attendance |
 | Appointments | `/appointments` | List; create a personnel action |
 | Guide | `/guide` | Step-by-step usage walkthrough |
+| MCP docs | `/mcp-docs` | MCP reference: tools, schemas, client setup (open, no key) |
 
 ### REST API — `/api` (requires `X-API-Key: changjuahn`)
 
@@ -175,7 +181,8 @@ Interactive docs at **`/api/docs`** (open — no key needed to browse).
 
 ### MCP server — `/mcp` (requires `X-API-Key: changjuahn`)
 
-Streamable HTTP (`stateless_http=True`). Nine tools:
+Streamable HTTP (`stateless_http=True`, so no session id and no `initialize`
+round-trip is required before `tools/list`). Nine tools:
 
 | Tool | 기능 |
 | --- | --- |
@@ -188,6 +195,31 @@ Streamable HTTP (`stateless_http=True`). Nine tools:
 | `list_leave_requests` | Leave requests (emp_id?, status?, leave_type?, date range?) |
 | `list_employees` | Employees for picking an emp_id (filters + `q` search) |
 | `get_employee` | One employee with full context |
+
+Tools returning a list are advertised with a wrapped output schema — the result
+arrives as `structuredContent.result`; dict-returning tools put the object
+directly in `structuredContent`.
+
+### MCP reference — `/mcp-docs` (open — no key needed to browse)
+
+The MCP counterpart of `/api/docs`. `api/mcp_docs.py` introspects the **live**
+`FastMCP` object from `mcp_server.server` — the same one that answers `/mcp` —
+and renders:
+
+- what MCP is, and how it differs from the REST surface;
+- connection details (endpoint, transport, protocol version, auth header, stateless);
+- server capabilities (`tools` yes; `resources`/`prompts` explicitly empty) and supported JSON-RPC methods;
+- every tool with its parameter table (type / required / default / allowed values),
+  the `structuredContent` shape, a runnable `tools/call` body, a Python snippet,
+  and the raw `inputSchema` / `outputSchema`;
+- copy-paste client config for VS Code, Claude Desktop, the Python SDK, and curl.
+
+Examples are filled with identifiers read from the seeded database (an existing
+employee, the busiest department, a leave request still in `신청`), so every
+example on the page runs as-is.
+
+`GET /mcp-docs/spec.json` returns the same document as JSON — the MCP analogue
+of `/api/openapi.json`.
 
 ---
 
@@ -231,8 +263,23 @@ async def main():
 asyncio.run(main())
 ```
 
+### curl — MCP
+
+The server is stateless, so a single request works with no `initialize`
+handshake and no session id. Responses come back as SSE, so `Accept` must list
+both content types:
+
+```bash
+curl -X POST "https://<fqdn>/mcp" \
+  -H "X-API-Key: changjuahn" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
 Popular MCP clients (e.g. Claude Desktop, VS Code) can point directly at
 `https://<fqdn>/mcp` (transport: streamable HTTP) with header `X-API-Key: changjuahn`.
+Ready-made config for each client is on **`https://<fqdn>/mcp-docs`**.
 
 ---
 
@@ -252,7 +299,7 @@ uvicorn api.main:app --port 8000
 python -m mcp_server
 ```
 
-Browse: <http://localhost:8000/> · <http://localhost:8000/api/docs>  
+Browse: <http://localhost:8000/> · <http://localhost:8000/api/docs> · <http://localhost:8000/mcp-docs>  
 MCP endpoint: `http://localhost:8001/mcp`
 
 Run tests:

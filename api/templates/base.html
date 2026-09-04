@@ -38,7 +38,8 @@
       <div class="nav-popover"><a href="/leave">연차·휴가</a><a href="/attendance">근태</a></div>
     </details>
     <a href="/appointments" {% if request.url.path == '/appointments' %}aria-current="page"{% endif %}>인사관리</a>
-    <a href="/api/docs">API</a>
+    <a href="/api/docs" {% if request.url.path.startswith('/api/docs') %}aria-current="page"{% endif %}>API 문서</a>
+    <a href="/mcp-docs" {% if request.url.path.startswith('/mcp-docs') %}aria-current="page"{% endif %}>MCP 문서</a>
   </nav>
   <main id="main-content" class="page-shell">
     {% if message %}{{ message_strip('success', message) }}{% endif %}

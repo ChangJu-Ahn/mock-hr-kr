@@ -2,8 +2,12 @@
 #
 # Single external ingress on :8080 (Azure Container Apps terminates TLS and
 # forwards HTTP here). Routes:
-#   /mcp, /mcp/*  -> MCP server   (streamable HTTP, needs unbuffered streaming)
-#   everything else -> API/web console
+#   /mcp-docs, /mcp-docs/*  -> API/web console (the human-readable MCP reference)
+#   /mcp, /mcp/*            -> MCP server (streamable HTTP, needs unbuffered streaming)
+#   everything else         -> API/web console
+#
+# /mcp-docs is matched FIRST and explicitly: it is a console page served by the
+# api container and must never be swallowed by the MCP transport route.
 #
 # Upstreams default to localhost (all containers share one network namespace
 # inside an ACA replica). For docker-compose they are overridden via env to the
@@ -12,9 +16,21 @@
 {
 	admin off
 	auto_https off
+	servers {
+		# ACA's ingress terminates TLS and forwards over the private pod network
+		# with X-Forwarded-Proto: https. Without trusting it, Caddy would rewrite
+		# the header to "http" and the docs/spec would advertise an http:// MCP
+		# endpoint.
+		trusted_proxies static private_ranges
+	}
 }
 
 :8080 {
+	@mcpdocs path /mcp-docs /mcp-docs/*
+	handle @mcpdocs {
+		reverse_proxy {$API_UPSTREAM:localhost:8000}
+	}
+
 	@mcp path /mcp /mcp/*
 	handle @mcp {
 		reverse_proxy {$MCP_UPSTREAM:localhost:8001} {

@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+{% from "_ui.html" import page_header %}
+{% block title %}MCP 문서 · Mock HR{% endblock %}
+{% block content %}
+{{ page_header('MCP 서버 문서', 'Mock HR의 MCP 서버가 실제로 노출하는 스펙(tools/list)을 그대로 문서화한 참조 페이지입니다.', '개발자 문서') }}
+
+<section class="panel doc-intro" aria-labelledby="mcp-intro-title">
+  <h2 id="mcp-intro-title">MCP가 뭔가요? What is MCP?</h2>
+  <p>
+    <strong>MCP(Model Context Protocol)</strong>는 AI 에이전트가 외부 시스템의 기능을 <em>발견하고 호출</em>하기 위한
+    개방형 표준입니다. 사람이 읽는 REST 문서와 달리, MCP 서버는 자신이 제공하는 <strong>도구(tool)</strong> 목록과
+    각 도구의 <strong>JSON Schema</strong>를 <code>tools/list</code>로 직접 알려줍니다.
+    에이전트는 이 스펙만 보고 어떤 인자를 넣어야 하는지 스스로 판단해 <code>tools/call</code>로 실행합니다.
+  </p>
+  <p class="muted">
+    이 페이지의 모든 내용은 별도로 작성한 문서가 아니라 실행 중인 MCP 서버 객체에서 뽑아낸 것입니다.
+    도구가 추가·변경되면 이 문서도 자동으로 따라갑니다.
+    원본 스펙은 <a href="/mcp-docs/spec.json"><code>/mcp-docs/spec.json</code></a>에서 JSON으로 받을 수 있습니다.
+  </p>
+
+  <h2>REST API와 MCP, 뭐가 다른가요?</h2>
+  <div class="table-shell">
+    <table class="data-table">
+      <thead>
+        <tr><th>구분</th><th>REST API</th><th>MCP 서버</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>대상</td><td>사람이 짜는 코드 · HTTP 클라이언트</td><td>AI 에이전트 · LLM 클라이언트</td></tr>
+        <tr><td>엔드포인트</td><td><code>/api/…</code> (리소스별 경로)</td><td><code data-mcp-url>{{ spec.server.endpoint }}</code> (단일 경로)</td></tr>
+        <tr><td>호출 방식</td><td>GET/POST + 경로 + 쿼리</td><td>JSON-RPC <code>tools/call</code> + 도구 이름</td></tr>
+        <tr><td>스펙 문서</td><td>OpenAPI (<a href="/api/docs">/api/docs</a>)</td><td><code>tools/list</code> (이 페이지)</td></tr>
+        <tr><td>담당 업무</td><td>사원 · 부서 · 직급 · 교육 · 인사발령</td><td>근태 · 연차·휴가 (+ 사원 조회)</td></tr>
+        <tr><td>인증</td><td colspan="2">공통 — 헤더 <code>{{ spec.server.auth.header }}: {{ spec.server.auth.key }}</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="muted">
+    두 창구는 <strong>같은 SQLite DB</strong>를 바라봅니다. MCP로 기록한 근태는 웹 콘솔
+    <a href="/attendance">근태</a> 화면에서 바로 확인할 수 있습니다.
+  </p>
+</section>
+
+<section class="content-card" aria-labelledby="mcp-connection-title">
+  <h2 id="mcp-connection-title">연결 정보 Connection</h2>
+  <dl class="detail-grid">
+    <div class="detail-item">
+      <dt class="detail-item__label">엔드포인트</dt>
+      <dd class="detail-item__value mono" data-mcp-url>{{ spec.server.endpoint }}</dd>
+    </div>
+    <div class="detail-item">
+      <dt class="detail-item__label">전송 방식 Transport</dt>
+      <dd class="detail-item__value">{{ spec.server.transport }}</dd>
+    </div>
+    <div class="detail-item">
+      <dt class="detail-item__label">프로토콜 버전</dt>
+      <dd class="detail-item__value mono">{{ spec.server.protocol_version }}</dd>
+    </div>
+    <div class="detail-item">
+      <dt class="detail-item__label">서버 이름 / SDK</dt>
+      <dd class="detail-item__value mono">{{ spec.server.name }} · mcp {{ spec.server.version }}</dd>
+    </div>
+    <div class="detail-item">
+      <dt class="detail-item__label">인증 헤더</dt>
+      <dd class="detail-item__value mono">{{ spec.server.auth.header }}: {{ spec.server.auth.key }}</dd>
+    </div>
+    <div class="detail-item">
+      <dt class="detail-item__label">세션</dt>
+      <dd class="detail-item__value">Stateless — 세션 ID 불필요</dd>
+    </div>
+  </dl>
+  <p class="muted">{{ spec.server.auth.note }}</p>
+
+  <h2>서버 기능 Capabilities</h2>
+  <div class="table-shell">
+    <table class="data-table">
+      <thead><tr><th>기능</th><th>지원</th><th>설명</th></tr></thead>
+      <tbody>
+        {% for cap in spec.capabilities %}
+        <tr>
+          <td class="mono">{{ cap.name }}</td>
+          <td>
+            <span class="status-badge status-badge--{{ 'positive' if cap.supported else 'neutral' }}">
+              {{ '지원' if cap.supported else '미지원' }}
+            </span>
+          </td>
+          <td>{{ cap.detail }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h2>지원 메서드 Methods</h2>
+  <div class="table-shell">
+    <table class="data-table">
+      <thead><tr><th>JSON-RPC 메서드</th><th>설명</th></tr></thead>
+      <tbody>
+        {% for m in spec.methods %}
+        <tr><td class="mono business-id">{{ m.method }}</td><td>{{ m.detail }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="content-card" aria-labelledby="mcp-tools-title">
+  <div class="tool-toolbar">
+    <h2 id="mcp-tools-title">도구 카탈로그 Tools <span class="muted">({{ spec.tool_count }})</span></h2>
+    <button type="button" class="button button--secondary" id="tool-expand-all" data-expanded="false">
+      모두 펼치기
+    </button>
+  </div>
+  <p class="muted">
+    도구 이름을 누르면 파라미터 스키마와 호출 예시가 열립니다.
+    <span class="status-badge status-badge--info">읽기</span>는 조회 전용,
+    <span class="status-badge status-badge--warning">쓰기</span>는 데이터를 변경하는 도구입니다.
+  </p>
+
+  <nav class="tool-index" aria-label="도구 바로가기">
+    {% for tool in spec.tools %}
+    <a class="tool-chip" href="#tool-{{ tool.name }}">{{ tool.name }}</a>
+    {% endfor %}
+  </nav>
+
+  {% for group in spec.groups %}
+  <section class="tool-group" aria-labelledby="group-{{ group.key }}">
+    <h3 id="group-{{ group.key }}">{{ group.title }}</h3>
+    {% if group.description %}<p class="muted">{{ group.description }}</p>{% endif %}
+
+    {% for tool in group.tools %}
+    <details class="tool-card" id="tool-{{ tool.name }}">
+      <summary>
+        <span class="tool-card__badge status-badge status-badge--{{ 'info' if tool.read_only else 'warning' }}">
+          {{ '읽기' if tool.read_only else '쓰기' }}
+        </span>
+        <span class="tool-card__name mono">{{ tool.name }}</span>
+        <span class="tool-card__summary">{{ tool.summary }}</span>
+      </summary>
+      <div class="tool-card__body">
+        <p>{{ tool.description }}</p>
+
+        <h4>파라미터 Parameters</h4>
+        <div class="table-shell">
+          <table class="data-table">
+            <thead><tr><th>이름</th><th>타입</th><th>필수</th><th>기본값</th><th>허용값</th></tr></thead>
+            <tbody>
+              {% for p in tool.parameters %}
+              <tr>
+                <td class="mono business-id">{{ p.name }}</td>
+                <td class="mono">{{ p.type }}</td>
+                <td>
+                  <span class="status-badge status-badge--{{ 'negative' if p.required else 'neutral' }}">
+                    {{ '필수' if p.required else '선택' }}
+                  </span>
+                </td>
+                <td class="mono">{{ p.default_display }}</td>
+                <td>{{ p.allowed | join(' · ') if p.allowed else '—' }}</td>
+              </tr>
+              {% else %}
+              <tr><td class="empty-state" colspan="5">파라미터가 없습니다.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <h4>반환 Result</h4>
+        <p class="muted"><code class="mono">structuredContent</code> · {{ tool.output.type }} — {{ tool.output.note }}</p>
+
+        <h4>호출 예시 Example</h4>
+        <p class="muted">JSON-RPC <code>tools/call</code> 요청 본문:</p>
+        <pre><code>{{ tool.example_call_json }}</code></pre>
+        <p class="muted">Python SDK:</p>
+        <pre><code>{{ tool.example_python }}</code></pre>
+
+        <details class="schema-toggle">
+          <summary>원본 JSON Schema 보기</summary>
+          <p class="muted">inputSchema</p>
+          <pre><code>{{ tool.input_schema_json }}</code></pre>
+          {% if tool.output_schema_json %}
+          <p class="muted">outputSchema</p>
+          <pre><code>{{ tool.output_schema_json }}</code></pre>
+          {% endif %}
+        </details>
+
+        {% if tool.console_page %}
+        <p class="muted">같은 업무를 웹 콘솔에서 보기 →
+          <a href="{{ tool.console_page }}">{{ tool.console_label }}</a></p>
+        {% endif %}
+      </div>
+    </details>
+    {% endfor %}
+  </section>
+  {% endfor %}
+</section>
+
+<section class="content-card" aria-labelledby="mcp-clients-title">
+  <h2 id="mcp-clients-title">클라이언트 연결 설정 Client setup</h2>
+  <p class="muted">
+    아래 설정을 그대로 복사해 쓰면 됩니다. 엔드포인트는 지금 보고 있는 주소 기준으로 채워져 있습니다.
+  </p>
+  {% for snip in spec.snippets %}
+  <article class="client-snippet">
+    <h3>{{ snip.title }} <span class="muted mono">{{ snip.file }}</span></h3>
+    <p class="muted">{{ snip.note }}</p>
+    <pre><code data-mcp-url>{{ snip.code }}</code></pre>
+  </article>
+  {% endfor %}
+</section>
+
+<section class="panel" aria-labelledby="mcp-more-title">
+  <h2 id="mcp-more-title">더 보기</h2>
+  <ul class="meta">
+    <li><a href="/mcp-docs/spec.json">/mcp-docs/spec.json</a> — 이 문서의 기계 판독용 원본(JSON)</li>
+    <li><a href="/api/docs">/api/docs</a> — REST API(OpenAPI) 문서</li>
+    <li><a href="/guide">/guide</a> — 업무 흐름과 사용법 안내</li>
+  </ul>
+</section>
+
+<script>
+  (function () {
+    // The MCP endpoint shares this page's origin. Server-side rendering only
+    // sees the internal hop, so rewrite the advertised URL from the address bar.
+    var rendered = {{ base_url | tojson }};
+    var actual = window.location.origin;
+    if (rendered && rendered !== actual) {
+      document.querySelectorAll('[data-mcp-url]').forEach(function (el) {
+        el.textContent = el.textContent.split(rendered).join(actual);
+      });
+    }
+
+    var toggle = document.getElementById('tool-expand-all');
+    var cards = document.querySelectorAll('.tool-card');
+    if (toggle) {
+      toggle.addEventListener('click', function () {
+        var expand = toggle.dataset.expanded !== 'true';
+        cards.forEach(function (card) { card.open = expand; });
+        toggle.dataset.expanded = String(expand);
+        toggle.textContent = expand ? '모두 접기' : '모두 펼치기';
+      });
+    }
+
+    function openTarget() {
+      if (!window.location.hash) return;
+      var target = document.querySelector(window.location.hash);
+      if (target && target.tagName === 'DETAILS') {
+        target.open = true;
+        target.scrollIntoView();
+      }
+    }
+    window.addEventListener('hashchange', openTarget);
+    openTarget();
+  })();
+</script>
+{% endblock %}

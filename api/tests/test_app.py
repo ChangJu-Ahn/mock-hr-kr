@@ -198,7 +198,7 @@ class WebConsoleTests(unittest.TestCase):
 
     def test_all_pages_render(self):
         for path in ("/", "/employees", "/departments", "/positions", "/courses",
-                     "/leave", "/attendance", "/appointments", "/guide"):
+                     "/leave", "/attendance", "/appointments", "/guide", "/mcp-docs"):
             self.assertEqual(self.client.get(path).status_code, 200, path)
 
     def test_employee_detail_renders(self):
@@ -349,6 +349,7 @@ class WebConsoleTests(unittest.TestCase):
             "/attendance",
             "/appointments",
             "/guide",
+            "/mcp-docs",
         ):
             self._assert_single_table_shell_wrapper(path)
 
@@ -474,6 +475,131 @@ class WebConsoleTests(unittest.TestCase):
             ".guide-step__number {",
         ):
             self.assertIn(token, css)
+
+    # --- MCP 문서 (the /api/docs counterpart) ------------------------------ #
+    def test_nav_exposes_both_api_and_mcp_reference_tabs(self):
+        html = self.client.get("/").text
+        self.assertIn('<a href="/api/docs" >API 문서</a>', html)
+        self.assertIn('<a href="/mcp-docs" >MCP 문서</a>', html)
+
+    def test_mcp_docs_tab_is_marked_current_on_the_mcp_docs_page(self):
+        html = self.client.get("/mcp-docs").text
+        self.assertIn('<a href="/mcp-docs" aria-current="page">MCP 문서</a>', html)
+
+    def test_dashboard_introduces_the_mcp_surface(self):
+        html = self.client.get("/").text
+        self.assertIn("에이전트 연결 창구", html)
+        self.assertIn('class="surface-card" href="/mcp-docs"', html)
+        self.assertIn('class="surface-card" href="/api/docs"', html)
+        self.assertIn("MCP 서버", html)
+
+    def test_guide_links_to_the_mcp_reference(self):
+        self.assertIn('href="/mcp-docs"', self.client.get("/guide").text)
+
+    def test_mcp_docs_page_is_open_and_explains_mcp(self):
+        # Mirrors /api/docs: browsable without an API key (cls.client sends none).
+        r = self.client.get("/mcp-docs")
+        self.assertEqual(r.status_code, 200)
+        for text in ("MCP가 뭔가요", "Model Context Protocol", "tools/list", "tools/call",
+                     "연결 정보", "서버 기능", "도구 카탈로그", "클라이언트 연결 설정"):
+            self.assertIn(text, r.text)
+
+    def test_mcp_docs_documents_every_tool_the_server_advertises(self):
+        import asyncio
+
+        from mcp_server.server import mcp
+
+        live = {t.name for t in asyncio.run(mcp.list_tools())}
+        self.assertEqual(len(live), 9)
+
+        html = self.client.get("/mcp-docs").text
+        spec = self.client.get("/mcp-docs/spec.json").json()
+        self.assertEqual({t["name"] for t in spec["tools"]}, live)
+        self.assertEqual(spec["tool_count"], len(live))
+        for name in live:
+            self.assertIn(f'id="tool-{name}"', html, name)
+
+    def test_mcp_docs_renders_parameter_tables_from_the_json_schema(self):
+        html = self.client.get("/mcp-docs").text
+        for heading in ("이름", "타입", "필수", "기본값", "허용값"):
+            self.assertIn(heading, html)
+        # log_attendance's schema: two required params, an enum-ish status.
+        spec = self.client.get("/mcp-docs/spec.json").json()
+        tool = next(t for t in spec["tools"] if t["name"] == "log_attendance")
+        self.assertEqual(tool["required"], ["emp_id", "work_date"])
+        status = next(p for p in tool["parameters"] if p["name"] == "status")
+        self.assertFalse(status["required"])
+        self.assertIn("지각", status["allowed"])
+        limit = next(p for p in next(
+            t for t in spec["tools"] if t["name"] == "list_attendance")["parameters"]
+            if p["name"] == "limit")
+        self.assertEqual(limit["default_display"], "100")
+
+    def test_mcp_docs_spec_reports_transport_auth_and_capabilities(self):
+        spec = self.client.get("/mcp-docs/spec.json").json()
+        server = spec["server"]
+        self.assertEqual(server["name"], "mock-hr-mcp")
+        self.assertEqual(server["transport"], "Streamable HTTP")
+        self.assertTrue(server["stateless"])
+        self.assertTrue(server["endpoint"].endswith("/mcp"))
+        self.assertEqual(server["auth"]["header"], "X-API-Key")
+        self.assertEqual(server["auth"]["key"], "changjuahn")
+        caps = {c["name"]: c["supported"] for c in spec["capabilities"]}
+        self.assertTrue(caps["tools"])
+        # The server registers no resources/prompts — say so rather than imply them.
+        self.assertFalse(caps["resources"])
+        self.assertFalse(caps["prompts"])
+        self.assertIn("tools/call", [m["method"] for m in spec["methods"]])
+
+    def test_mcp_docs_documents_the_structured_content_wrapping(self):
+        spec = self.client.get("/mcp-docs/spec.json").json()
+        by_name = {t["name"]: t for t in spec["tools"]}
+        # list_* tools return a list, which FastMCP wraps as {"result": [...]}.
+        self.assertEqual(by_name["list_attendance"]["output"]["kind"], "wrapped")
+        self.assertEqual(by_name["list_attendance"]["output"]["type"], "array<object>")
+        # dict-returning tools expose the object directly.
+        self.assertEqual(by_name["get_employee"]["output"]["kind"], "object")
+
+    def test_mcp_docs_examples_use_ids_that_exist_in_the_seeded_data(self):
+        spec = self.client.get("/mcp-docs/spec.json").json()
+        by_name = {t["name"]: t for t in spec["tools"]}
+
+        emp_id = by_name["get_employee"]["example_arguments"]["emp_id"]
+        self.assertIsNotNone(self.db.get_employee(emp_id))
+
+        dept_code = by_name["list_employees"]["example_arguments"]["dept_code"]
+        self.assertTrue(self.db.list_employees(dept_code=dept_code))
+
+        # A 승인 example is only runnable against a request still in 신청.
+        request_id = by_name["decide_leave_request"]["example_arguments"]["request_id"]
+        pending = {r["id"] for r in self.db.list_leave_requests(status="신청", limit=500)}
+        self.assertIn(request_id, pending)
+
+    def test_mcp_docs_client_snippets_carry_the_endpoint_and_api_key(self):
+        html = self.client.get("/mcp-docs").text
+        spec = self.client.get("/mcp-docs/spec.json").json()
+        endpoint = spec["server"]["endpoint"]
+        keys = {s["key"] for s in spec["snippets"]}
+        self.assertEqual(keys, {"vscode", "claude", "python", "curl"})
+        for snippet in spec["snippets"]:
+            self.assertIn(endpoint, snippet["code"], snippet["key"])
+            self.assertIn("changjuahn", snippet["code"], snippet["key"])
+        # Streamable HTTP needs both Accept types; say so in the raw example.
+        curl = next(s for s in spec["snippets"] if s["key"] == "curl")
+        self.assertIn("application/json, text/event-stream", curl["code"])
+        self.assertIn("mcp-remote", html)
+
+    def test_mcp_docs_styles_are_served(self):
+        css = self.client.get("/static/styles.css").text
+        for token in (".tool-card {", ".tool-index {", ".surface-card {", ".tool-chip {"):
+            self.assertIn(token, css)
+
+    def test_mcp_docs_advertises_the_forwarded_public_origin(self):
+        # Behind the ACA ingress + Caddy the api container only sees the internal
+        # hop, so the endpoint must be rebuilt from the forwarded headers.
+        r = self.client.get("/mcp-docs/spec.json", headers={
+            "X-Forwarded-Proto": "https", "X-Forwarded-Host": "mock-hr.example.net"})
+        self.assertEqual(r.json()["server"]["endpoint"], "https://mock-hr.example.net/mcp")
 
 
 

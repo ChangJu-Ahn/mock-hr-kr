@@ -2,10 +2,11 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette import status
 
+from api import mcp_docs
 from hr_core import db
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -287,3 +288,34 @@ def appointments_create(emp_id: str = Form(...), type: str = Form(...),
 @router.get("/guide")
 def guide(request: Request):
     return templates.TemplateResponse(request, "guide.html", _context(request))
+
+
+# --------------------------------------------------------------------------- #
+# MCP 문서 (MCP reference — the counterpart of /api/docs)
+# --------------------------------------------------------------------------- #
+
+def _public_base_url(request: Request) -> str:
+    """Origin as the browser sees it, honouring the ACA ingress / Caddy hops.
+
+    The MCP endpoint lives on the same origin as this page, so the docs must
+    advertise the externally reachable scheme+host rather than the internal
+    ``http://localhost:8000`` the api container is addressed on.
+    """
+    forwarded_proto = request.headers.get("x-forwarded-proto")
+    scheme = forwarded_proto.split(",")[0].strip() if forwarded_proto else request.url.scheme
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host")
+            or request.url.netloc)
+    return f"{scheme}://{host.split(',')[0].strip()}"
+
+
+@router.get("/mcp-docs")
+async def mcp_docs_page(request: Request):
+    base_url = _public_base_url(request)
+    return templates.TemplateResponse(request, "mcp_docs.html", _context(
+        request, spec=await mcp_docs.build_spec(base_url), base_url=base_url))
+
+
+@router.get("/mcp-docs/spec.json")
+async def mcp_docs_spec(request: Request):
+    """Machine-readable MCP reference — the MCP analogue of /api/openapi.json."""
+    return JSONResponse(await mcp_docs.build_spec(_public_base_url(request)))
