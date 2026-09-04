@@ -1,14 +1,28 @@
 // Mock HR on Azure Container Apps (Consumption, cheapest).
 //
-// ONE Container App, ONE replica, scale-to-zero. All containers share an
-// ephemeral EmptyDir volume mounted at /data holding the SQLite DB:
-//   init container 'seed' -> writes /data/hr.db before app containers start
+// ONE Container App, ONE always-on replica. All containers share an EmptyDir
+// volume mounted at /data holding the SQLite DB:
+//   init container 'seed' -> bootstraps /data/hr.db if empty, before app start
 //   'api'  container       -> FastAPI web console + REST on :8000
 //   'mcp'  container       -> MCP streamable-HTTP on :8001 (/mcp)
 //   'proxy' container      -> Caddy, the single external ingress on :8080
 //
+// DATA DURABILITY: EmptyDir lives and dies with the replica, so anything
+// written through the REST/MCP surfaces survives only as long as the replica
+// does. Two consequences:
+//   * minReplicas must stay >= 1 (see the param) or an idle period silently
+//     wipes everything;
+//   * a new revision starts a new replica, so redeploying resets the dataset
+//     back to the seeded snapshot.
+// The seed itself is a bootstrap, not a reset: it leaves a populated DB alone
+// unless run with --force / HR_SEED_FORCE=1, so restarts do not destroy data.
+// For durability across redeploys, replace this volume with an Azure Files
+// share -- note SQLite's WAL journal does not work over SMB, so hr_core.db
+// would also need journal_mode switched away from WAL.
+//
 // Sizing: each container 0.25 vCPU / 0.5 GiB (ACA minimum). The 3 app
-// containers sum to 0.75 vCPU / 1.5 GiB per replica. minReplicas=0 => ~$0 idle.
+// containers sum to 0.75 vCPU / 1.5 GiB per replica, billed continuously
+// because the app no longer scales to zero.
 
 @description('Deployment region.')
 param location string = resourceGroup().location
@@ -27,6 +41,11 @@ param revisionSuffix string = 'r${utcNow('yyMMddHHmmss')}'
 
 @description('Demo API key required in the X-API-Key header on all REST /api/* and MCP /mcp calls. Web console + /api/docs stay open.')
 param apiKey string = 'changjuahn'
+
+@description('Minimum replicas. Keep at 1: the SQLite DB sits on an ephemeral EmptyDir volume, so scaling to zero destroys every row written since the replica started. Set 0 only if resetting to the seeded snapshot on every idle period is acceptable.')
+@minValue(0)
+@maxValue(1)
+param minReplicas int = 1
 
 var dbPath = '/data/hr.db'
 var dbEnv = [
@@ -148,7 +167,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
         }
       ]
       scale: {
-        minReplicas: 0
+        minReplicas: minReplicas
         maxReplicas: 1
       }
     }

@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# Deploy the mock HR system to Azure Container Apps (Consumption, scale-to-zero).
+# Deploy the mock HR system to Azure Container Apps (Consumption).
 #
 # Prereqs: az CLI logged in. Images must already be published (public) to GHCR
 # by the GitHub Actions workflow (.github/workflows/images.yml).
+#
+# NOTE ON DATA: the SQLite DB lives on an ephemeral EmptyDir volume, so this
+# deploy starts a fresh replica and resets the dataset to the seeded snapshot.
+# Rows written through REST/MCP since the last start are not carried over.
 #
 # Usage:
 #   ./infra/deploy.sh                      # defaults: rg-mock-hr-kr / koreacentral

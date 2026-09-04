@@ -42,7 +42,7 @@ class RestApiTests(unittest.TestCase):
         os.environ["HR_DB_PATH"] = os.path.join(os.getcwd(), "data", "hr_api_unittest.db")
         from hr_core import db, seed
         db.reset_db()
-        seed.seed()
+        seed.seed(force=True)
         from api.main import app
         cls.db = db
         cls.client = TestClient(app, headers=KEY)
@@ -175,7 +175,7 @@ class WebConsoleTests(unittest.TestCase):
         os.environ["HR_DB_PATH"] = os.path.join(os.getcwd(), "data", "hr_web_unittest.db")
         from hr_core import db, seed
         db.reset_db()
-        seed.seed()
+        seed.seed(force=True)
         from api.main import app
         cls.db = db
         cls.client = TestClient(app)  # web is open (no key)

@@ -17,17 +17,18 @@ Both agent surfaces are documented in the console: REST through OpenAPI at
 the live `FastMCP` server (tool schemas, capabilities, client config), so it can
 never drift from what `tools/list` actually returns.
 
-> **MVP / demo only.** The database is **ephemeral** and **re-seeded on every
-> cold start**, so every demo run gets a fresh, identical HR snapshot. A single
-> shared demo key (`changjuahn`) gates the agent surfaces; there is no real
-> security.
+> **MVP / demo only.** The database is **ephemeral** — it lives on a volume tied
+> to the running replica, so a redeploy resets it to the seeded snapshot. The
+> seed is a *bootstrap*, not a reset: restarts leave existing rows alone. See
+> [Data lifecycle](#data-lifecycle). A single shared demo key (`changjuahn`)
+> gates the agent surfaces; there is no real security.
 
 ---
 
 ## Architecture
 
-A **single** Azure Container App (Consumption, one replica, **scale-to-zero**).
-All containers in the replica share one **ephemeral `EmptyDir` volume** mounted
+A **single** Azure Container App (Consumption, one always-on replica).
+All containers in the replica share one **`EmptyDir` volume** mounted
 at `/data`, holding `hr.db`.
 
 ```mermaid
@@ -43,7 +44,7 @@ flowchart LR
 
 | Container | Image | Role |
 | --- | --- | --- |
-| **seed** (init) | `mock-hr-app` | Runs `python -m hr_core.seed` once before app containers start; exits |
+| **seed** (init) | `mock-hr-app` | Runs `python -m hr_core.seed` before app containers start; bootstraps `hr.db` only if empty, then exits |
 | **api** | `mock-hr-app` | FastAPI/Uvicorn on `:8000` — web console (`/`) + REST (`/api`) + MCP reference (`/mcp-docs`) |
 | **mcp** | `mock-hr-app` | MCP streamable HTTP on `:8001` at `/mcp` |
 | **proxy** | `mock-hr-proxy` | Caddy on `:8080` — single external ingress, routes `/mcp-docs*` → api, `/mcp`+`/mcp/*` → mcp, `/*` → api |
@@ -51,8 +52,9 @@ flowchart LR
 Two public GHCR images are built by `.github/workflows/images.yml`:
 `ghcr.io/changju-ahn/mock-hr-app` and `ghcr.io/changju-ahn/mock-hr-proxy`.
 
-Sizing: each container **0.25 vCPU / 0.5 GiB** (ACA minimum), `minReplicas=0`
-(~$0 when idle), `maxReplicas=1` (single replica; shared `EmptyDir` is per-replica).
+Sizing: each container **0.25 vCPU / 0.5 GiB** (ACA minimum), `minReplicas=1`
+(always on, so the per-replica `EmptyDir` DB is not discarded when idle),
+`maxReplicas=1`.
 
 ---
 
@@ -289,7 +291,7 @@ Ready-made config for each client is on **`https://<fqdn>/mcp-docs`**.
 python3.12 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 
-# Seed the DB (creates data/hr.db)
+# Seed the DB (creates data/hr.db; add --force to regenerate an existing one)
 HR_DB_PATH=$(pwd)/data/hr.db python -m hr_core.seed
 
 # Terminal 1 — web console + REST API
@@ -331,14 +333,15 @@ RG=rg-mock-hr-kr LOCATION=koreacentral ./infra/deploy.sh
 The script creates the resource group and deploys `infra/main.bicep` (ACA
 environment + Container App). It prints the three live endpoints on completion.
 
-**3 · Redeploy** (pick up a new `:latest` or force a cold-start reseed):
+**3 · Redeploy** (pick up a new `:latest`):
 
 ```bash
 az containerapp update -g rg-mock-hr-kr -n mock-hr \
   --revision-suffix "r$(date +%s)"
 ```
 
-Each new revision re-runs the seed init container → fresh, reproducible dataset.
+Each new revision starts a new replica with an empty volume, so the seed init
+container rebuilds the snapshot — **rows added since the last start are lost**.
 
 **4 · Teardown**
 
@@ -350,20 +353,55 @@ az group delete -n rg-mock-hr-kr --yes --no-wait
 
 ## Cost notes
 
-- **Scale-to-zero** (`minReplicas=0`): ~**$0** compute when idle (billed only
-  during active request handling, plus a small Log Analytics cost).
+- `minReplicas=1`: one replica runs continuously. Scale-to-zero would be
+  cheaper, but the SQLite file is per-replica, so idling to zero would discard
+  everything written since the last start (see [Data lifecycle](#data-lifecycle)).
 - Each container: **0.25 vCPU / 0.5 GiB** (ACA minimum); three app containers
   total **0.75 vCPU / 1.5 GiB** per replica.
 - Single replica (`maxReplicas=1`): the shared `EmptyDir` SQLite is per-replica.
-- SQLite is **ephemeral** — data is lost on every cold start; the seed init
-  container restores the deterministic snapshot automatically.
 - Public GHCR images → **no** Azure Container Registry needed.
+
+---
+
+## Data lifecycle
+
+The SQLite file sits on an `EmptyDir` volume, which lives and dies with the
+replica. What that means in practice:
+
+| Event | Data written via REST/MCP |
+| --- | --- |
+| Container restart within the replica | **kept** — the seed skips a populated DB |
+| Scale to zero, then back up | **lost** — hence `minReplicas=1` |
+| New revision (redeploy) | **lost** — a new replica gets a new empty volume |
+
+`python -m hr_core.seed` is a **bootstrap, not a reset**. It runs as the ACA init
+container on every replica start, and does nothing when the database already
+holds rows, so restarting never destroys data that agents or external
+key-authenticated callers wrote. Regenerating the snapshot is opt-in:
+
+```bash
+python -m hr_core.seed --force     # or: HR_SEED_FORCE=1 python -m hr_core.seed
+```
+
+Nothing else deletes data: there are no `DELETE` endpoints on the REST, web, or
+MCP surfaces (every route is a GET or POST), and the schema has no
+`ON DELETE CASCADE`. `reset_db()` is the only row-deleting function and the
+forced seed is its only caller.
+
+The API key is **not** stored in the database — it comes from the `HR_API_KEY`
+environment variable (default `changjuahn`), injected from the revision
+template on every start, so resetting the data never changes or removes it.
+
+**To survive redeploys**, replace the `EmptyDir` volume in `infra/main.bicep`
+with an Azure Files share. Note that SQLite's WAL journal does not work over
+SMB, so `hr_core/db.py` would also need `journal_mode` switched away from WAL,
+and the concurrent `api` + `mcp` writers would then contend on SMB file locks.
 
 ---
 
 ## Seeded data snapshot
 
-Re-seeded on every cold start (deterministic):
+Written once when the database is empty (deterministic):
 
 | Entity | Count |
 | --- | --- |
@@ -377,5 +415,6 @@ Re-seeded on every cold start (deterministic):
 | Attendance | **310** (31 active × 10 weekdays) |
 | Appointments | **43** (입사 34 + 승진/이동/휴직/복직/퇴직 9) |
 
-> **Note:** the database is ephemeral. All data above is re-created identically
-> on every cold start. Do not store anything you need to keep.
+> **Note:** identifiers are stable — `E0001`, `D200`, `P3` and friends come back
+> identically whenever the snapshot is regenerated, so external tests can rely
+> on them. Rows *added* after seeding are only as durable as the replica.

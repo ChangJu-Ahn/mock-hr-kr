@@ -362,7 +362,7 @@ class SeedTests(unittest.TestCase):
         importlib.reload(db)
         importlib.reload(seed)
         cls.db, cls.seed = db, seed
-        seed.seed()
+        seed.seed(force=True)
 
     @classmethod
     def tearDownClass(cls):
@@ -380,6 +380,39 @@ class SeedTests(unittest.TestCase):
         self.assertEqual(c["training_record"], 212)
         self.assertEqual(c["leave_request"], 23)
         self.assertEqual(c["attendance"], 310)        # 31 active x 10 weekdays
+
+    def test_reseeding_a_populated_db_preserves_existing_rows(self):
+        # The seed runs as an init container on EVERY replica start, so it must
+        # never destroy rows that agents / external key-authenticated tests
+        # wrote through the REST or MCP surfaces after the first boot.
+        emp = self.db.hire_employee(name="보존확인", dept_code="D200", position_code="P3")
+        emp_id = emp["emp_id"]
+        before = self.db.counts()
+        # Other tests in this class assert exact seeded counts, so restore the
+        # pristine snapshot regardless of how this test exits.
+        self.addCleanup(self.seed.seed, force=True)
+
+        self.assertFalse(self.seed.seed(), "populated DB must not be re-seeded")
+
+        self.assertEqual(self.db.counts(), before)
+        self.assertIsNotNone(self.db.get_employee(emp_id))
+
+    def test_force_regenerates_a_reproducible_dataset(self):
+        # Opting in explicitly still wipes and rebuilds the same snapshot, so
+        # the demo dataset stays reproducible.
+        self.assertTrue(self.seed.seed(force=True))
+        c = self.db.counts()
+        self.assertEqual(c["employee"], 34)
+        self.assertEqual(c["leave_request"], 23)
+
+    def test_force_flag_is_read_from_argv_and_env(self):
+        self.assertFalse(self.seed._force_requested([]))
+        self.assertTrue(self.seed._force_requested(["--force"]))
+        os.environ["HR_SEED_FORCE"] = "1"
+        try:
+            self.assertTrue(self.seed._force_requested([]))
+        finally:
+            del os.environ["HR_SEED_FORCE"]
 
     def test_employee_status_breakdown(self):
         by_status = {r["status"]: r["n"] for r in self.db.get_dashboard_summary()["employees_by_status"]}
