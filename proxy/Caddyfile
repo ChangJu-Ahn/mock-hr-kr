@@ -12,16 +12,17 @@
 # Upstreams default to localhost (all containers share one network namespace
 # inside an ACA replica). For docker-compose they are overridden via env to the
 # service names (api:8000 / mcp:8001).
-
 {
 	admin off
 	auto_https off
 	servers {
-		# ACA's ingress terminates TLS and forwards over the private pod network
-		# with X-Forwarded-Proto: https. Without trusting it, Caddy would rewrite
-		# the header to "http" and the docs/spec would advertise an http:// MCP
-		# endpoint.
-		trusted_proxies static private_ranges
+		# The ACA ingress terminates TLS and forwards over Azure-managed
+		# infrastructure with X-Forwarded-Proto set from the real client
+		# connection. Its source IPs are dynamic and are NOT in Caddy's
+		# private_ranges, so trust every peer: this container is only ever
+		# reachable through that ingress, and the header only feeds the origin
+		# printed on the docs page.
+		trusted_proxies static 0.0.0.0/0 ::/0
 	}
 }
 

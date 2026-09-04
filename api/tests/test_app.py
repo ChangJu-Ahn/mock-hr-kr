@@ -601,6 +601,18 @@ class WebConsoleTests(unittest.TestCase):
             "X-Forwarded-Proto": "https", "X-Forwarded-Host": "mock-hr.example.net"})
         self.assertEqual(r.json()["server"]["endpoint"], "https://mock-hr.example.net/mcp")
 
+    def test_mcp_docs_origin_survives_chained_and_empty_forwarded_headers(self):
+        # Multiple hops append to the header; the client-facing value is first.
+        r = self.client.get("/mcp-docs/spec.json", headers={
+            "X-Forwarded-Proto": "https, http", "X-Forwarded-Host": "mock-hr.example.net, internal"})
+        self.assertEqual(r.json()["server"]["endpoint"], "https://mock-hr.example.net/mcp")
+
+        # A proxy that blanks the header must not yield a "://host" endpoint.
+        r = self.client.get("/mcp-docs/spec.json", headers={"X-Forwarded-Proto": "  "})
+        endpoint = r.json()["server"]["endpoint"]
+        self.assertTrue(endpoint.startswith("http://"), endpoint)
+        self.assertTrue(endpoint.endswith("/mcp"), endpoint)
+
 
 
 if __name__ == "__main__":

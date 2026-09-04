@@ -301,11 +301,12 @@ def _public_base_url(request: Request) -> str:
     advertise the externally reachable scheme+host rather than the internal
     ``http://localhost:8000`` the api container is addressed on.
     """
-    forwarded_proto = request.headers.get("x-forwarded-proto")
-    scheme = forwarded_proto.split(",")[0].strip() if forwarded_proto else request.url.scheme
+    forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
+    scheme = forwarded_proto or request.url.scheme
     host = (request.headers.get("x-forwarded-host") or request.headers.get("host")
             or request.url.netloc)
-    return f"{scheme}://{host.split(',')[0].strip()}"
+    host = host.split(",")[0].strip() or request.url.netloc
+    return f"{scheme}://{host}"
 
 
 @router.get("/mcp-docs")
