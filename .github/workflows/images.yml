@@ -49,5 +49,5 @@ jobs:
           file: ${{ matrix.dockerfile }}
           push: true
           tags: |
-            ghcr.io/changju-ahn/${{ matrix.image }}:latest
             ghcr.io/changju-ahn/${{ matrix.image }}:${{ github.sha }}
+            ${{ github.ref == 'refs/heads/main' && format('ghcr.io/changju-ahn/{0}:latest', matrix.image) || '' }}
