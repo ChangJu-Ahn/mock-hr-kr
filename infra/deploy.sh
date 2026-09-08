@@ -11,6 +11,7 @@
 # Usage:
 #   ./infra/deploy.sh                      # defaults: rg-mock-hr-kr / koreacentral
 #   RG=my-rg LOCATION=eastus ./infra/deploy.sh
+#   HR_HISTORY_START=2026-07-06 ./infra/deploy.sh  # pin first attendance day
 set -euo pipefail
 
 RG="${RG:-rg-mock-hr-kr}"
@@ -18,6 +19,7 @@ LOCATION="${LOCATION:-koreacentral}"
 APP_NAME="${APP_NAME:-mock-hr}"
 APP_IMAGE="${APP_IMAGE:-ghcr.io/changju-ahn/mock-hr-app:latest}"
 PROXY_IMAGE="${PROXY_IMAGE:-ghcr.io/changju-ahn/mock-hr-proxy:latest}"
+HISTORY_START="${HR_HISTORY_START:-}"
 
 echo "==> Ensuring containerapp extension + providers"
 az extension add --name containerapp --upgrade --only-show-errors -y >/dev/null 2>&1 || true
@@ -33,6 +35,7 @@ az deployment group create \
   -n "mock-hr-$(date +%s)" \
   -f infra/main.bicep \
   -p location="$LOCATION" appName="$APP_NAME" appImage="$APP_IMAGE" proxyImage="$PROXY_IMAGE" \
+     historyStart="$HISTORY_START" \
   -o none
 
 FQDN="$(az containerapp show -g "$RG" -n "$APP_NAME" --query properties.configuration.ingress.fqdn -o tsv)"

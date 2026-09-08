@@ -1,15 +1,27 @@
 {% extends "base.html" %}
 {% from "_ui.html" import page_header, empty_row %}
+{% from "_master_forms.html" import position_fields, master_actions %}
 {% block title %}직급 관리 · Mock HR{% endblock %}
 {% block content %}
 {{ page_header('직급 관리', '직급 체계와 레벨별 기본 연차, 재직 인원을 확인합니다.', '조직') }}
+
+<details class="action-panel" id="position-create">
+  <summary>＋ 직급 생성</summary>
+  <div class="action-panel__body">
+    <p class="muted">코드는 수정할 수 없습니다. 사원·발령이 참조 중이면 삭제가 차단됩니다. 기본 연차 변경은 기존 부여분을 바꾸지 않습니다.</p>
+    <form method="post" action="/positions/create" class="row">
+      {{ position_fields({}, true) }}
+      <button type="submit">직급 생성</button>
+    </form>
+  </div>
+</details>
 
 <section class="content-card" aria-labelledby="position-table-title">
   <h2 id="position-table-title">직급 기준 정보</h2>
   <div class="table-shell">
     <table class="data-table">
       <thead>
-        <tr><th>직급코드</th><th>직급명</th><th>레벨</th><th>기본 연차(일)</th><th>재직인원</th></tr>
+        <tr><th>직급코드</th><th>직급명</th><th>레벨</th><th>기본 연차(일)</th><th>재직인원</th><th>관리</th></tr>
       </thead>
       <tbody>
         {% for r in rows %}
@@ -19,9 +31,12 @@
           <td>{{ r.level_no }}</td>
           <td>{{ r.min_leave_days }}</td>
           <td>{{ r.headcount }}</td>
+          <td class="master-actions">
+            {% call master_actions('positions', r.position_code) %}{{ position_fields(r) }}{% endcall %}
+          </td>
         </tr>
         {% else %}
-        {{ empty_row(5, '등록된 직급이 없습니다.') }}
+        {{ empty_row(6, '등록된 직급이 없습니다.') }}
         {% endfor %}
       </tbody>
     </table>

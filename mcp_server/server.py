@@ -1,8 +1,9 @@
-"""MCP server exposing the mock HR Attendance & Leave tools."""
+"""MCP server exposing Attendance, Leave and master-data CRUD."""
 
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -207,6 +208,167 @@ def get_employee(emp_id: str) -> dict[str, Any]:
     return emp
 
 
+def _master_write(action: Callable[..., dict[str, Any]], /, *args, **kwargs) -> dict[str, Any]:
+    try:
+        return action(*args, **kwargs)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+
+@mcp.tool(description=(
+    "사원 등록(create_employee): hire an employee, grant annual leave and create an 입사 "
+    "appointment atomically. emp_id is optional (auto-assigned) and immutable afterward. "
+    "References must exist. Returns the employee or an error object."
+))
+def create_employee(name: str, dept_code: str, position_code: str,
+                    employment_type: str = "정규직", email: str | None = None,
+                    phone: str | None = None, hire_date: str | None = None,
+                    birth_date: str | None = None, manager_emp_id: str | None = None,
+                    emp_id: str | None = None) -> dict[str, Any]:
+    return _master_write(
+        db.hire_employee, name=name, dept_code=dept_code, position_code=position_code,
+        employment_type=employment_type, email=email, phone=phone, hire_date=hire_date,
+        birth_date=birth_date, manager_emp_id=manager_emp_id, emp_id=emp_id,
+    )
+
+
+@mcp.tool(description=(
+    "사원 수정(update_employee): patch fields using changes. Allowed: name, dept_code, "
+    "position_code, email, phone, employment_type, status, hire_date, birth_date, manager_emp_id. "
+    "Omitted fields stay unchanged; null clears nullable fields. emp_id is immutable. "
+    "Changing hire_date also updates 입사 appointments. Returns a row or error object."
+))
+def update_employee(emp_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+    return _master_write(db.update_employee, emp_id, **changes)
+
+
+@mcp.tool(description=(
+    "사원 삭제(delete_employee): delete only an unreferenced employee. Reports/managers, "
+    "training, leave balances/requests/approvals, attendance and appointments block deletion. "
+    "A newly hired employee has balance and appointment references too. No cascades; "
+    "returns an error object naming all blockers and counts instead of raising."
+))
+def delete_employee(emp_id: str) -> dict[str, Any]:
+    return _master_write(db.delete_employee, emp_id)
+
+
+@mcp.tool(description="부서 조회(list_departments): list departments, optionally by parent_dept_code.")
+def list_departments(parent_dept_code: str | None = None) -> list[dict[str, Any]]:
+    return db.list_departments(parent_dept_code=parent_dept_code)
+
+
+@mcp.tool(description="부서 상세(get_department): get one department with parent and manager context.")
+def get_department(dept_code: str) -> dict[str, Any]:
+    row = db.get_department(dept_code)
+    return row if row is not None else {"not_found": f"Department '{dept_code}' was not found."}
+
+
+@mcp.tool(description=(
+    "부서 생성(create_department): create a department with a unique immutable dept_code. "
+    "Optional parent department and manager must exist; hierarchy cycles are rejected."
+))
+def create_department(dept_code: str, dept_name: str, parent_dept_code: str | None = None,
+                      manager_emp_id: str | None = None, cost_center: str | None = None) -> dict[str, Any]:
+    return _master_write(db.create_department, dept_code=dept_code, dept_name=dept_name,
+                         parent_dept_code=parent_dept_code, manager_emp_id=manager_emp_id,
+                         cost_center=cost_center)
+
+
+@mcp.tool(description=(
+    "부서 수정(update_department): changes may contain dept_name, parent_dept_code, "
+    "manager_emp_id, cost_center. Null clears optional fields; dept_code is immutable. "
+    "Invalid references/cycles return an error object."
+))
+def update_department(dept_code: str, changes: dict[str, Any]) -> dict[str, Any]:
+    return _master_write(db.update_department, dept_code, **changes)
+
+
+@mcp.tool(description=(
+    "부서 삭제(delete_department): only delete an unreferenced department. Employees "
+    "(including retired), child departments and appointments block deletion. No cascades; "
+    "returns an error object naming the blocking records and counts."
+))
+def delete_department(dept_code: str) -> dict[str, Any]:
+    return _master_write(db.delete_department, dept_code)
+
+
+@mcp.tool(description="직급 조회(list_positions): list positions with level, leave allowance and headcount.")
+def list_positions() -> list[dict[str, Any]]:
+    return db.list_positions()
+
+
+@mcp.tool(description="직급 상세(get_position): get one position by its immutable position_code.")
+def get_position(position_code: str) -> dict[str, Any]:
+    row = db.get_position(position_code)
+    return row if row is not None else {"not_found": f"Position '{position_code}' was not found."}
+
+
+@mcp.tool(description=(
+    "직급 생성(create_position): create a unique immutable position_code. level_no is an "
+    "integer >=1 and min_leave_days is finite and >=0. Returns a row or an error object."
+))
+def create_position(position_code: str, position_name: str, level_no: int = 1,
+                    min_leave_days: float = 15.0) -> dict[str, Any]:
+    return _master_write(db.create_position, position_code=position_code, position_name=position_name,
+                         level_no=level_no, min_leave_days=min_leave_days)
+
+
+@mcp.tool(description=(
+    "직급 수정(update_position): changes may contain position_name, level_no, min_leave_days. "
+    "position_code is immutable. Existing employee leave grants are not retroactively changed."
+))
+def update_position(position_code: str, changes: dict[str, Any]) -> dict[str, Any]:
+    return _master_write(db.update_position, position_code, **changes)
+
+
+@mcp.tool(description=(
+    "직급 삭제(delete_position): only delete when no employees or appointments reference "
+    "the position. Returns an error object with blocker counts; never cascades."
+))
+def delete_position(position_code: str) -> dict[str, Any]:
+    return _master_write(db.delete_position, position_code)
+
+
+@mcp.tool(description="과정 조회(list_courses): list courses; filter by category, is_mandatory or q.")
+def list_courses(category: str | None = None, is_mandatory: bool | None = None,
+                 q: str | None = None) -> list[dict[str, Any]]:
+    return db.list_courses(category=category, is_mandatory=is_mandatory, q=q)
+
+
+@mcp.tool(description="과정 상세(get_course): get one course by its immutable course_code.")
+def get_course(course_code: str) -> dict[str, Any]:
+    row = db.get_course(course_code)
+    return row if row is not None else {"not_found": f"Course '{course_code}' was not found."}
+
+
+@mcp.tool(description=(
+    "과정 생성(create_course): create a course with a unique immutable course_code. "
+    "Optional hours/capacity are nonnegative; capacity is integral. Returns a row or error object."
+))
+def create_course(course_code: str, course_name: str, category: str | None = None,
+                  delivery: str | None = None, hours: float | None = None,
+                  capacity: int | None = None, is_mandatory: bool = False) -> dict[str, Any]:
+    return _master_write(db.create_course, course_code=course_code, course_name=course_name,
+                         category=category, delivery=delivery, hours=hours,
+                         capacity=capacity, is_mandatory=is_mandatory)
+
+
+@mcp.tool(description=(
+    "과정 수정(update_course): changes may contain course_name, category, delivery, hours, "
+    "capacity, is_mandatory. Null clears nullable fields; course_code is immutable."
+))
+def update_course(course_code: str, changes: dict[str, Any]) -> dict[str, Any]:
+    return _master_write(db.update_course, course_code, **changes)
+
+
+@mcp.tool(description=(
+    "과정 삭제(delete_course): only delete an unreferenced course. Any training record "
+    "blocks deletion; returns an error object with its count rather than raising."
+))
+def delete_course(course_code: str) -> dict[str, Any]:
+    return _master_write(db.delete_course, course_code)
+
+
 def main() -> None:
     import uvicorn
 
@@ -254,15 +416,33 @@ def build_asgi_app() -> _ApiKeyGuard:
 __all__ = [
     "DEFAULT_API_KEY",
     "build_asgi_app",
+    "create_course",
+    "create_department",
+    "create_employee",
+    "create_position",
+    "delete_course",
+    "delete_department",
+    "delete_employee",
+    "delete_position",
     "decide_leave_request",
     "get_attendance_summary",
     "get_employee",
+    "get_course",
+    "get_department",
+    "get_position",
     "get_leave_balance",
     "list_attendance",
     "list_employees",
+    "list_courses",
+    "list_departments",
+    "list_positions",
     "list_leave_requests",
     "log_attendance",
     "main",
     "mcp",
     "submit_leave_request",
+    "update_course",
+    "update_department",
+    "update_employee",
+    "update_position",
 ]

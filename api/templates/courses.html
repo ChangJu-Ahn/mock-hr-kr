@@ -1,9 +1,21 @@
 {% extends "base.html" %}
 {% from "_ui.html" import page_header, status_badge, empty_row %}
+{% from "_master_forms.html" import course_fields, master_actions %}
 {% block title %}교육 관리 · Mock HR{% endblock %}
 {% block content %}
 {{ page_header('교육 관리', '교육과정과 이수 현황을 한 화면에서 확인하고 수강 신청·이수 처리를 진행합니다.', '인재 개발') }}
 <p class="muted">법정필수 교육 이수율: {{ completion.completed }}/{{ completion.total }} ({{ completion.rate }}%)</p>
+
+<details class="action-panel" id="course-create">
+  <summary>＋ 교육과정 생성</summary>
+  <div class="action-panel__body">
+    <p class="muted">코드는 수정할 수 없습니다. 교육이력이 있는 과정은 삭제가 차단됩니다.</p>
+    <form method="post" action="/courses/create" class="row">
+      {{ course_fields({}, true) }}
+      <button type="submit">과정 생성</button>
+    </form>
+  </div>
+</details>
 
 <details class="action-panel" id="training-action">
   <summary>＋ 수강 신청</summary>
@@ -38,6 +50,7 @@
           <th>시간</th>
           <th>정원</th>
           <th>필수</th>
+          <th>관리</th>
         </tr>
       </thead>
       <tbody>
@@ -50,9 +63,12 @@
           <td>{{ c.hours }}</td>
           <td>{{ c.capacity }}</td>
           <td>{% if c.is_mandatory %}필수{% else %}선택{% endif %}</td>
+          <td class="master-actions">
+            {% call master_actions('courses', c.course_code) %}{{ course_fields(c) }}{% endcall %}
+          </td>
         </tr>
         {% else %}
-        {{ empty_row(7, '등록된 교육과정이 없습니다.') }}
+        {{ empty_row(8, '등록된 교육과정이 없습니다.') }}
         {% endfor %}
       </tbody>
     </table>

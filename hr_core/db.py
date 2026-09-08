@@ -17,6 +17,8 @@ Design notes
 from __future__ import annotations
 
 import os
+import math
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
@@ -267,6 +269,212 @@ def _leave_days(leave_type: str | None, start_date: str, end_date: str) -> float
     return float((e - s).days + 1)
 
 
+class ConflictError(ValueError):
+    """A duplicate key or existing reference prevents a master-data mutation."""
+
+
+class NotFoundError(ValueError):
+    """The master record being changed does not exist."""
+
+
+_MASTER_KEYS = {
+    "department": "dept_code", "position": "position_code",
+    "employee": "emp_id", "course": "course_code",
+}
+_MASTER_FIELDS = {
+    "department": {"dept_name", "parent_dept_code", "manager_emp_id", "cost_center"},
+    "position": {"position_name", "level_no", "min_leave_days"},
+    "employee": {"name", "dept_code", "position_code", "email", "phone",
+                 "employment_type", "status", "hire_date", "birth_date", "manager_emp_id"},
+    "course": {"course_name", "category", "delivery", "hours", "capacity", "is_mandatory"},
+}
+_REQUIRED_FIELDS = {
+    "dept_name", "position_name", "name", "course_name", "dept_code", "position_code",
+    "employment_type", "status", "hire_date",
+}
+_MASTER_REFERENCES = {
+    "department": (
+        ("employee", ("dept_code",), "employees"),
+        ("department", ("parent_dept_code",), "child departments"),
+        ("appointment", ("from_dept", "to_dept"), "appointments"),
+    ),
+    "position": (
+        ("employee", ("position_code",), "employees"),
+        ("appointment", ("from_position", "to_position"), "appointments"),
+    ),
+    "course": (("training_record", ("course_code",), "training records"),),
+    "employee": (
+        ("employee", ("manager_emp_id",), "reporting employees"),
+        ("department", ("manager_emp_id",), "managed departments"),
+        ("training_record", ("emp_id",), "training records"),
+        ("leave_balance", ("emp_id",), "leave balances"),
+        ("leave_request", ("emp_id",), "leave requests (employee)"),
+        ("leave_request", ("approver_emp_id",), "leave requests (approver)"),
+        ("attendance", ("emp_id",), "attendance records"),
+        ("appointment", ("emp_id",), "appointments"),
+    ),
+}
+
+
+@contextmanager
+def _write_transaction():
+    with get_conn() as conn:
+        with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            yield conn
+
+
+def _text(value, field, *, required=False):
+    if value is None and not required:
+        return None
+    if not isinstance(value, str) or (required and not value.strip()):
+        raise ValueError(f"{field} must be a non-empty string" if required
+                         else f"{field} must be a string or null")
+    return value.strip() or None
+
+
+def _identifier(value, field):
+    value = _text(value, field, required=True)
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", value) is None:
+        raise ValueError(f"{field} must be 1-64 URL-safe characters: letters, digits, _, ., -")
+    return value
+
+
+def _number(value, field, *, minimum=0, integer=False):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field} must be a finite number")
+    try:
+        number = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{field} must be a finite number") from exc
+    if (not math.isfinite(number) or value < minimum
+            or (integer and (int(value) != value or value > 2**63 - 1))):
+        kind = "integer" if integer else "number"
+        raise ValueError(f"{field} must be a finite {kind} >= {minimum}")
+    return int(value) if integer else number
+
+
+def _reference(conn, table, column, value):
+    if value is not None and conn.execute(
+        f"SELECT 1 FROM {table} WHERE {column}=?", (value,)
+    ).fetchone() is None:
+        raise ValueError(f"unknown {column}: {value!r}")
+
+
+def _check_hierarchy(conn, table, key, parent, parent_column):
+    seen = {key}
+    column = _MASTER_KEYS[table]
+    while parent is not None:
+        if parent in seen:
+            raise ValueError(f"{table} {key}: {parent_column} would create a cycle")
+        seen.add(parent)
+        row = conn.execute(
+            f"SELECT {parent_column} FROM {table} WHERE {column}=?", (parent,)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"unknown {parent_column}: {parent!r}")
+        parent = row[0]
+
+
+def _validated_master_fields(conn, table, key, values):
+    primary_key = _MASTER_KEYS[table]
+    if primary_key in values:
+        raise ValueError(f"{primary_key} is immutable")
+    unknown = set(values) - _MASTER_FIELDS[table]
+    if unknown:
+        raise ValueError(f"unknown {table} fields: {', '.join(sorted(unknown))}")
+    if not values:
+        raise ValueError("at least one field is required")
+    out = {}
+    for field, value in values.items():
+        if field in ("level_no", "min_leave_days", "hours", "capacity"):
+            out[field] = None if value is None and field in ("hours", "capacity") else _number(
+                value, field, minimum=1 if field == "level_no" else 0,
+                integer=field in ("level_no", "capacity"))
+        elif field == "is_mandatory":
+            if not isinstance(value, (bool, int)) or value not in (0, 1):
+                raise ValueError("is_mandatory must be a boolean or 0/1")
+            out[field] = int(value)
+        else:
+            out[field] = _text(value, field, required=field in _REQUIRED_FIELDS)
+        if field in ("hire_date", "birth_date") and out[field] is not None:
+            try:
+                parsed = date.fromisoformat(out[field])
+            except ValueError as exc:
+                raise ValueError(f"{field} must be YYYY-MM-DD") from exc
+            if parsed.isoformat() != out[field]:
+                raise ValueError(f"{field} must be YYYY-MM-DD")
+    for field, choices in (
+        ("employment_type", ("정규직", "계약직", "인턴")),
+        ("status", ("재직", "휴직", "퇴직")),
+    ):
+        if field in out and out[field] not in choices:
+            raise ValueError(f"{field} must be one of {choices}")
+    for field, target, column in (
+        ("dept_code", "department", "dept_code"),
+        ("parent_dept_code", "department", "dept_code"),
+        ("position_code", "position", "position_code"),
+        ("manager_emp_id", "employee", "emp_id"),
+    ):
+        if field in out:
+            _reference(conn, target, column, out[field])
+    parent_column = {"department": "parent_dept_code", "employee": "manager_emp_id"}.get(table)
+    if parent_column in out:
+        _check_hierarchy(conn, table, key, out[parent_column], parent_column)
+    return out
+
+
+def _master_row(conn, table, key):
+    row = conn.execute(
+        f"SELECT * FROM {table} WHERE {_MASTER_KEYS[table]}=?", (key,)
+    ).fetchone()
+    if row is None:
+        raise NotFoundError(f"{table} {key} not found")
+    return dict(row)
+
+
+def _insert_master_row(conn, table, key, values):
+    column = _MASTER_KEYS[table]
+    if conn.execute(f"SELECT 1 FROM {table} WHERE {column}=?", (key,)).fetchone():
+        raise ConflictError(f"{table} {key} already exists")
+    values = {column: key, **_validated_master_fields(conn, table, key, values)}
+    names = ", ".join(f'"{name}"' for name in values)
+    marks = ", ".join("?" for _ in values)
+    conn.execute(f"INSERT INTO {table} ({names}) VALUES ({marks})", tuple(values.values()))
+    return _master_row(conn, table, key)
+
+
+def _update_master(table, key, changes):
+    with _write_transaction() as conn:
+        _master_row(conn, table, key)
+        values = _validated_master_fields(conn, table, key, changes)
+        assignments = ", ".join(f'"{name}"=?' for name in values)
+        conn.execute(f"UPDATE {table} SET {assignments} WHERE {_MASTER_KEYS[table]}=?",
+                     (*values.values(), key))
+        if table == "employee" and "hire_date" in values:
+            conn.execute("UPDATE appointment SET effective_date=? WHERE emp_id=? AND type='입사'",
+                         (values["hire_date"], key))
+        return _master_row(conn, table, key)
+
+
+def _delete_master(table, key):
+    with _write_transaction() as conn:
+        _master_row(conn, table, key)
+        blockers = []
+        for source, columns, label in _MASTER_REFERENCES[table]:
+            where = " OR ".join(f'"{column}"=?' for column in columns)
+            count = conn.execute(f"SELECT COUNT(*) FROM {source} WHERE {where}",
+                                 (key,) * len(columns)).fetchone()[0]
+            if count:
+                blockers.append(f"{count} {label}")
+        if blockers:
+            raise ConflictError(
+                f"cannot delete {table} {key}: still referenced by {', '.join(blockers)}")
+        column = _MASTER_KEYS[table]
+        conn.execute(f"DELETE FROM {table} WHERE {column}=?", (key,))
+        return {"deleted": True, column: key}
+
+
 # --------------------------------------------------------------------------- #
 # 부서 (department)
 # --------------------------------------------------------------------------- #
@@ -295,6 +503,26 @@ def get_department(dept_code):
     with get_conn() as conn:
         row = conn.execute(_DEPT_SELECT + "WHERE d.dept_code = ?", (dept_code,)).fetchone()
         return dict(row) if row else None
+
+
+def create_department(dept_code, dept_name, parent_dept_code=None, manager_emp_id=None,
+                      cost_center=None):
+    code = _identifier(dept_code, "dept_code")
+    if code == "tree":
+        raise ValueError("dept_code 'tree' is reserved for the department-tree endpoint")
+    with _write_transaction() as conn:
+        return _insert_master_row(conn, "department", code, {
+            "dept_name": dept_name, "parent_dept_code": parent_dept_code,
+            "manager_emp_id": manager_emp_id, "cost_center": cost_center,
+        })
+
+
+def update_department(identifier, /, **changes):
+    return _update_master("department", identifier, changes)
+
+
+def delete_department(dept_code):
+    return _delete_master("department", dept_code)
 
 
 def list_department_codes() -> list[str]:
@@ -354,6 +582,22 @@ def get_position(position_code):
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM position WHERE position_code = ?", (position_code,)).fetchone()
         return dict(row) if row else None
+
+
+def create_position(position_code, position_name, level_no=1, min_leave_days=15.0):
+    code = _identifier(position_code, "position_code")
+    with _write_transaction() as conn:
+        return _insert_master_row(conn, "position", code, {
+            "position_name": position_name, "level_no": level_no, "min_leave_days": min_leave_days,
+        })
+
+
+def update_position(identifier, /, **changes):
+    return _update_master("position", identifier, changes)
+
+
+def delete_position(position_code):
+    return _delete_master("position", position_code)
 
 
 # --------------------------------------------------------------------------- #
@@ -458,40 +702,33 @@ def hire_employee(name, dept_code, position_code, employment_type="정규직", e
                   phone=None, hire_date=None, birth_date=None, manager_emp_id=None,
                   emp_id=None, year=None):
     """Create an employee (status 재직), grant the year's leave, log a 입사 appointment."""
-    if not name:
-        raise ValueError("name is required")
     hire_date = hire_date or _today()
     year = year or _current_year()
-    with get_conn() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            dept = conn.execute("SELECT * FROM department WHERE dept_code = ?", (dept_code,)).fetchone()
-            if dept is None:
-                raise ValueError(f"unknown dept_code: {dept_code!r}")
-            pos = conn.execute("SELECT * FROM position WHERE position_code = ?", (position_code,)).fetchone()
-            if pos is None:
-                raise ValueError(f"unknown position_code: {position_code!r}")
-            if emp_id is None:
-                emp_id = _next_emp_id(conn)
-            conn.execute(
-                "INSERT INTO employee (emp_id, name, dept_code, position_code, email, phone,"
-                " employment_type, status, hire_date, birth_date, manager_emp_id)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                (emp_id, name, dept_code, position_code, email, phone, employment_type,
-                 "재직", hire_date, birth_date, manager_emp_id),
-            )
-            entitled = float(pos["min_leave_days"] or 15)
-            _upsert_leave_balance(conn, emp_id, year, entitled_delta=entitled)
-            conn.execute(
-                "INSERT INTO appointment (emp_id, effective_date, type, from_dept, to_dept,"
-                " from_position, to_position, note) VALUES (?,?,?,?,?,?,?,?)",
-                (emp_id, hire_date, "입사", None, dept_code, None, position_code, "신규 입사"),
-            )
-            conn.execute("COMMIT")
-        except Exception:
-            conn.execute("ROLLBACK")
-            raise
+    with _write_transaction() as conn:
+        emp_id = _next_emp_id(conn) if emp_id is None else _identifier(emp_id, "emp_id")
+        emp = _insert_master_row(conn, "employee", emp_id, {
+            "name": name, "dept_code": dept_code, "position_code": position_code,
+            "email": email, "phone": phone, "employment_type": employment_type, "status": "재직",
+            "hire_date": hire_date, "birth_date": birth_date, "manager_emp_id": manager_emp_id,
+        })
+        pos = conn.execute("SELECT min_leave_days FROM position WHERE position_code=?",
+                           (emp["position_code"],)).fetchone()
+        _upsert_leave_balance(conn, emp_id, year, entitled_delta=float(pos["min_leave_days"]))
+        conn.execute(
+            "INSERT INTO appointment (emp_id, effective_date, type, from_dept, to_dept,"
+            " from_position, to_position, note) VALUES (?,?,?,?,?,?,?,?)",
+            (emp_id, emp["hire_date"], "입사", None, emp["dept_code"],
+             None, emp["position_code"], "신규 입사"),
+        )
     return get_employee(emp_id)
+
+
+def update_employee(identifier, /, **changes):
+    return _update_master("employee", identifier, changes)
+
+
+def delete_employee(emp_id):
+    return _delete_master("employee", emp_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -522,6 +759,24 @@ def get_course(course_code):
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM course WHERE course_code = ?", (course_code,)).fetchone()
         return dict(row) if row else None
+
+
+def create_course(course_code, course_name, category=None, delivery=None, hours=None,
+                  capacity=None, is_mandatory=False):
+    code = _identifier(course_code, "course_code")
+    with _write_transaction() as conn:
+        return _insert_master_row(conn, "course", code, {
+            "course_name": course_name, "category": category, "delivery": delivery,
+            "hours": hours, "capacity": capacity, "is_mandatory": is_mandatory,
+        })
+
+
+def update_course(identifier, /, **changes):
+    return _update_master("course", identifier, changes)
+
+
+def delete_course(course_code):
+    return _delete_master("course", course_code)
 
 
 def list_training_records(emp_id=None, course_code=None, status=None, category=None,
@@ -563,7 +818,7 @@ def _training_row(conn, record_id):
 def enroll_training(emp_id, course_code, enroll_date=None, status="수강중"):
     """Enroll an employee on a course (default status 수강중)."""
     enroll_date = enroll_date or _today()
-    with get_conn() as conn:
+    with _write_transaction() as conn:
         emp = conn.execute("SELECT 1 FROM employee WHERE emp_id = ?", (emp_id,)).fetchone()
         if emp is None:
             raise ValueError(f"unknown emp_id: {emp_id!r}")
@@ -662,7 +917,7 @@ def grant_annual_leave(emp_id, year=None, days=15.0):
     if days < 0:
         raise ValueError(f"days must be >= 0, got {days}")
     year = year or _current_year()
-    with get_conn() as conn:
+    with _write_transaction() as conn:
         emp = conn.execute("SELECT 1 FROM employee WHERE emp_id = ?", (emp_id,)).fetchone()
         if emp is None:
             raise ValueError(f"unknown emp_id: {emp_id!r}")
@@ -717,10 +972,11 @@ def submit_leave_request(emp_id, leave_type, start_date, end_date=None, reason=N
         raise ValueError(f"days must be > 0, got {days}")
     applied_date = applied_date or _today()
     year = int(start_date[:4])
-    with get_conn() as conn:
+    with _write_transaction() as conn:
         emp = conn.execute("SELECT 1 FROM employee WHERE emp_id = ?", (emp_id,)).fetchone()
         if emp is None:
             raise ValueError(f"unknown emp_id: {emp_id!r}")
+        _upsert_leave_balance(conn, emp_id, year)
         rid = conn.execute(
             "INSERT INTO leave_request (emp_id, leave_type, start_date, end_date, days,"
             " reason, status, applied_date) VALUES (?,?,?,?,?,?,?,?)",
@@ -747,6 +1003,7 @@ def decide_leave_request(request_id, decision, approver_emp_id=None, decided_dat
     with get_conn() as conn:
         conn.execute("BEGIN IMMEDIATE")
         try:
+            _reference(conn, "employee", "emp_id", approver_emp_id)
             lr = conn.execute("SELECT * FROM leave_request WHERE id = ?", (request_id,)).fetchone()
             if lr is None:
                 raise ValueError(f"unknown leave request id: {request_id!r}")
@@ -795,7 +1052,7 @@ def log_attendance(emp_id, work_date, check_in=None, check_out=None, status=None
     """Record (upsert) a day's attendance; derives work/overtime hours and status."""
     work_hours, overtime = _calc_work_hours(check_in, check_out)
     st = _derive_attendance_status(check_in, check_out, status)
-    with get_conn() as conn:
+    with _write_transaction() as conn:
         emp = conn.execute("SELECT 1 FROM employee WHERE emp_id = ?", (emp_id,)).fetchone()
         if emp is None:
             raise ValueError(f"unknown emp_id: {emp_id!r}")
@@ -904,6 +1161,8 @@ def create_appointment(emp_id, type, effective_date=None, to_dept=None, to_posit
     with get_conn() as conn:
         conn.execute("BEGIN IMMEDIATE")
         try:
+            _reference(conn, "department", "dept_code", to_dept)
+            _reference(conn, "position", "position_code", to_position)
             emp = conn.execute("SELECT * FROM employee WHERE emp_id = ?", (emp_id,)).fetchone()
             if emp is None:
                 raise ValueError(f"unknown emp_id: {emp_id!r}")

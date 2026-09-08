@@ -1,0 +1,55 @@
+{% macro department_fields(r, departments, managers, creating=false) -%}
+<label>부서코드 <input {% if creating %}name="dept_code" required{% else %}readonly{% endif %} value="{{ r.get('dept_code', '') }}"></label>
+<label>부서명 <input name="dept_name" value="{{ r.get('dept_name', '') }}" required></label>
+<label>상위부서
+  <select name="parent_dept_code">
+    <option value="">없음</option>
+    {% for d in departments if d.dept_code != r.get('dept_code') %}
+    <option value="{{ d.dept_code }}" {% if d.dept_code == r.get('parent_dept_code') %}selected{% endif %}>{{ d.dept_code }} · {{ d.dept_name }}</option>
+    {% endfor %}
+  </select>
+</label>
+<label>부서장
+  <select name="manager_emp_id">
+    <option value="">미지정</option>
+    {% for e in managers %}<option value="{{ e.emp_id }}" {% if e.emp_id == r.get('manager_emp_id') %}selected{% endif %}>{{ e.emp_id }} · {{ e.name }}</option>{% endfor %}
+  </select>
+</label>
+<label>코스트센터 <input name="cost_center" value="{{ r.get('cost_center') or '' }}"></label>
+{%- endmacro %}
+
+{% macro position_fields(r, creating=false) -%}
+<label>직급코드 <input {% if creating %}name="position_code" required{% else %}readonly{% endif %} value="{{ r.get('position_code', '') }}"></label>
+<label>직급명 <input name="position_name" value="{{ r.get('position_name', '') }}" required></label>
+<label>레벨 <input type="number" name="level_no" min="1" step="1" value="{{ r.get('level_no', 1) }}" required></label>
+<label>기본 연차(일) <input type="number" name="min_leave_days" min="0" step="0.5" value="{{ r.get('min_leave_days', 15) }}" required></label>
+{%- endmacro %}
+
+{% macro course_fields(r, creating=false) -%}
+<label>과정코드 <input {% if creating %}name="course_code" required{% else %}readonly{% endif %} value="{{ r.get('course_code', '') }}"></label>
+<label>과정명 <input name="course_name" value="{{ r.get('course_name', '') }}" required></label>
+<label>구분 <input name="category" value="{{ r.get('category') or '' }}"></label>
+<label>방식 <input name="delivery" value="{{ r.get('delivery') or '' }}"></label>
+<label>시간 <input type="number" name="hours" min="0" step="any" value="{{ r.get('hours') if r.get('hours') is not none else '' }}"></label>
+<label>정원 <input type="number" name="capacity" min="0" step="1" value="{{ r.get('capacity') if r.get('capacity') is not none else '' }}"></label>
+<label>필수 여부
+  <select name="is_mandatory">
+    <option value="0" {% if not r.get('is_mandatory') %}selected{% endif %}>선택</option>
+    <option value="1" {% if r.get('is_mandatory') %}selected{% endif %}>필수</option>
+  </select>
+</label>
+{%- endmacro %}
+
+{% macro master_actions(collection, key) -%}
+<details class="master-editor">
+  <summary>수정</summary>
+  <form method="post" action="/{{ collection }}/{{ key }}/update" class="row">
+    {{ caller() }}
+    <button type="submit">저장</button>
+  </form>
+</details>
+<form method="post" action="/{{ collection }}/{{ key }}/delete" class="master-delete"
+      onsubmit="return confirm('기준정보를 삭제하시겠습니까? 참조 중이면 차단됩니다.');">
+  <button type="submit" class="button--negative">삭제</button>
+</form>
+{%- endmacro %}

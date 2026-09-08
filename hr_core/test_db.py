@@ -1,11 +1,33 @@
 """Unit tests for the mock HR data layer (hr_core.db)."""
 
 import importlib
+import hashlib
+import io
+import json
 import os
+import sqlite3
+import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from datetime import date, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 TEST_DB = Path(__file__).resolve().parents[1] / "data" / "hr_core_unit_test.db"
+
+def _raw_tables(db):
+    with db.get_conn() as conn:
+        tables = {}
+        for table in reversed(db.TABLES):
+            columns = [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
+            order = ", ".join(f'"{column}"' for column in columns)
+            tables[table] = [list(row) for row in conn.execute(
+                f"SELECT * FROM {table} ORDER BY {order}")]
+        return tables
+
+
+def _fixture_bytes(tables):
+    return (json.dumps(tables, ensure_ascii=False, indent=1) + "\n").encode("utf-8")
 
 
 class DbTestBase(unittest.TestCase):
@@ -362,10 +384,13 @@ class SeedTests(unittest.TestCase):
         importlib.reload(db)
         importlib.reload(seed)
         cls.db, cls.seed = db, seed
+        cls.environment = patch.dict(os.environ, {"HR_HISTORY_START": "2026-07-06"})
+        cls.environment.start()
         seed.seed(force=True)
 
     @classmethod
     def tearDownClass(cls):
+        cls.environment.stop()
         for f in TEST_DB.parent.glob(TEST_DB.name + "*"):
             f.unlink(missing_ok=True)
 
@@ -381,38 +406,38 @@ class SeedTests(unittest.TestCase):
         self.assertEqual(c["leave_request"], 23)
         self.assertEqual(c["attendance"], 310)        # 31 active x 10 weekdays
 
-    def test_reseeding_a_populated_db_preserves_existing_rows(self):
-        # The seed runs as an init container on EVERY replica start, so it must
-        # never destroy rows that agents / external key-authenticated tests
-        # wrote through the REST or MCP surfaces after the first boot.
-        emp = self.db.hire_employee(name="보존확인", dept_code="D200", position_code="P3")
+    def test_reseeding_a_populated_db_resets_existing_rows(self):
+        emp = self.db.hire_employee(name="초기화확인", dept_code="D200", position_code="P3")
         emp_id = emp["emp_id"]
-        before = self.db.counts()
-        # Other tests in this class assert exact seeded counts, so restore the
-        # pristine snapshot regardless of how this test exits.
         self.addCleanup(self.seed.seed, force=True)
 
-        self.assertFalse(self.seed.seed(), "populated DB must not be re-seeded")
+        self.assertTrue(self.seed.seed(), "every boot must restore the fixture")
 
-        self.assertEqual(self.db.counts(), before)
-        self.assertIsNotNone(self.db.get_employee(emp_id))
+        self.assertEqual(self.db.counts()["employee"], 34)
+        self.assertIsNone(self.db.get_employee(emp_id))
 
     def test_force_regenerates_a_reproducible_dataset(self):
-        # Opting in explicitly still wipes and rebuilds the same snapshot, so
-        # the demo dataset stays reproducible.
+        # Older callers may still pass force; both forms now restore the fixture.
         self.assertTrue(self.seed.seed(force=True))
         c = self.db.counts()
         self.assertEqual(c["employee"], 34)
         self.assertEqual(c["leave_request"], 23)
 
-    def test_force_flag_is_read_from_argv_and_env(self):
-        self.assertFalse(self.seed._force_requested([]))
-        self.assertTrue(self.seed._force_requested(["--force"]))
-        os.environ["HR_SEED_FORCE"] = "1"
-        try:
-            self.assertTrue(self.seed._force_requested([]))
-        finally:
-            del os.environ["HR_SEED_FORCE"]
+    def test_seed_force_environment_cannot_disable_reset(self):
+        self.db.hire_employee(name="초기화확인", dept_code="D200", position_code="P3")
+        self.addCleanup(self.seed.seed, force=True)
+        with patch.dict(os.environ, {"HR_SEED_FORCE": "0"}):
+            self.seed.seed()
+        self.assertEqual(self.db.counts()["employee"], 34)
+
+    def test_programmatic_main_does_not_consume_host_arguments(self):
+        with patch("sys.argv", ["unittest", "hr_core.test_db"]), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            try:
+                self.seed.main()
+            except SystemExit as exc:
+                self.fail(f"programmatic seed.main() consumed host arguments: {exc}")
+        self.assertEqual(self.db.counts()["employee"], 34)
 
     def test_employee_status_breakdown(self):
         by_status = {r["status"]: r["n"] for r in self.db.get_dashboard_summary()["employees_by_status"]}
@@ -448,6 +473,280 @@ class SeedTests(unittest.TestCase):
         rate = self.db.training_completion_rate(mandatory_only=True)
         self.assertEqual(rate["total"], 155)
         self.assertEqual(rate["completed"], 124)
+
+
+class HistoryWindowTests(unittest.TestCase):
+    def setUp(self):
+        from hr_core import db, seed
+        self.db, self.seed = db, seed
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        environment = patch.dict(os.environ, {"HR_DB_PATH": str(Path(temporary.name) / "hr.db")})
+        environment.start()
+        self.addCleanup(environment.stop)
+        os.environ.pop("HR_HISTORY_START", None)
+
+    def _attendance_bounds(self):
+        with self.db.get_conn() as conn:
+            first, last = conn.execute(
+                "SELECT MIN(work_date), MAX(work_date) FROM attendance").fetchone()
+        return date.fromisoformat(first), date.fromisoformat(last)
+
+    def test_latest_attendance_is_less_than_one_week_old(self):
+        self.seed.seed(force=True)
+        _, last = self._attendance_bounds()
+        self.assertGreaterEqual((date.today() - last).days, 0)
+        self.assertLess((date.today() - last).days, 7)
+
+    def test_history_start_pins_the_first_attendance_day(self):
+        with patch.dict(os.environ, {"HR_HISTORY_START": "2025-12-22"}):
+            self.seed.seed(force=True)
+        first, last = self._attendance_bounds()
+        self.assertEqual(first, date(2025, 12, 22))
+        self.assertEqual(last, date(2026, 1, 2))
+
+    def _columns(self):
+        with self.db.get_conn() as conn:
+            return {table: [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
+                    for table in self.db.TABLES}
+
+    def test_all_weekdays_negative_offsets_leap_day_and_year_boundaries(self):
+        fixture = self.seed.load_dataset()
+        for monday in (date(2026, 7, 13), date(2026, 9, 7),
+                       date(2026, 12, 28), date(2028, 2, 28)):
+            for day in range(7):
+                today = monday + timedelta(days=day)
+                with self.subTest(today=today):
+                    self.seed.seed(today=today)
+                    columns = self._columns()
+                    rows = _raw_tables(self.db)
+                    expected = timedelta(days=7 * ((today - date(2026, 7, 17)).days // 7))
+                    _, last = self._attendance_bounds()
+                    self.assertEqual(last, date(2026, 7, 17) + expected)
+                    self.assertIn((today - last).days, range(7))
+                    for row in rows["attendance"]:
+                        self.assertLess(date.fromisoformat(
+                            row[columns["attendance"].index("work_date")]).weekday(), 5)
+                    for table, names in self.seed.TIME_COLUMNS.items():
+                        for before, after in zip(fixture[table], rows[table], strict=True):
+                            for name in names:
+                                index = columns[table].index(name)
+                                if before[index] is None:
+                                    self.assertIsNone(after[index])
+                                else:
+                                    old = date.fromisoformat(before[index])
+                                    new = date.fromisoformat(after[index])
+                                    self.assertEqual(new - old, expected, (table, name))
+                                    self.assertLessEqual(new, today, (table, name))
+
+    def test_every_gap_duration_clock_and_nonhistory_value_survives(self):
+        fixture = self.seed.load_dataset()
+        self.seed.seed(today=date(2026, 9, 8))
+        shifted = _raw_tables(self.db)
+        columns = self._columns()
+        for table, rows in fixture.items():
+            if table == "leave_balance":
+                continue
+            moving = self.seed.TIME_COLUMNS.get(table, ())
+            for before, after in zip(rows, shifted[table], strict=True):
+                for index, name in enumerate(columns[table]):
+                    if name not in moving:
+                        self.assertEqual(before[index], after[index], (table, name))
+            for name in moving:
+                index = columns[table].index(name)
+                old = [date.fromisoformat(row[index]) for row in rows if row[index] is not None]
+                new = [date.fromisoformat(row[index]) for row in shifted[table]
+                       if row[index] is not None]
+                self.assertEqual([right - left for left, right in zip(old, old[1:])],
+                                 [right - left for left, right in zip(new, new[1:])])
+        for table, left, right in (
+            ("leave_request", "start_date", "end_date"),
+            ("training_record", "enroll_date", "complete_date"),
+        ):
+            a, b = columns[table].index(left), columns[table].index(right)
+            duration = lambda rows: [
+                date.fromisoformat(row[b]) - date.fromisoformat(row[a])
+                for row in rows if row[a] is not None and row[b] is not None]
+            self.assertEqual(duration(fixture[table]), duration(shifted[table]))
+
+    def test_birth_dates_stay_fixed_and_hire_appointments_move_with_employees(self):
+        self.seed.seed(today=date(2030, 1, 1))
+        columns = self._columns()["employee"]
+        birth = columns.index("birth_date")
+        self.assertEqual([row[birth] for row in self.seed.load_dataset()["employee"]],
+                         [row[birth] for row in _raw_tables(self.db)["employee"]])
+        with self.db.get_conn() as conn:
+            mismatches = conn.execute(
+                "SELECT e.emp_id FROM employee e JOIN appointment a ON a.emp_id=e.emp_id "
+                "WHERE a.type='입사' AND a.effective_date != e.hire_date").fetchall()
+        self.assertEqual(mismatches, [])
+
+    def test_balances_are_rebuilt_for_each_request_year_including_pending(self):
+        self.seed.seed(today=date(2026, 2, 20))
+        with self.db.get_conn() as conn:
+            years = {row[0] for row in conn.execute(
+                "SELECT DISTINCT substr(start_date,1,4) FROM leave_request")}
+            self.assertEqual(years, {"2025", "2026"})
+            missing = conn.execute(
+                "SELECT lr.id FROM leave_request lr LEFT JOIN leave_balance lb "
+                "ON lb.emp_id=lr.emp_id AND lb.year=CAST(substr(lr.start_date,1,4) AS INTEGER) "
+                "WHERE lb.emp_id IS NULL").fetchall()
+            self.assertEqual(missing, [], "every request, not just approvals, needs a balance")
+            mismatches = conn.execute(
+                "SELECT lb.* FROM leave_balance lb WHERE lb.used_days != ("
+                "SELECT COALESCE(SUM(lr.days),0) FROM leave_request lr "
+                "WHERE lr.emp_id=lb.emp_id AND CAST(substr(lr.start_date,1,4) AS INTEGER)=lb.year "
+                "AND lr.status='승인') OR lb.remaining_days != lb.entitled_days-lb.used_days"
+            ).fetchall()
+            self.assertEqual(mismatches, [])
+        original = {row[0]: row[2] for row in self.seed.load_dataset()["leave_balance"]}
+        for balance in _raw_tables(self.db)["leave_balance"]:
+            self.assertEqual(balance[2], original[balance[0]])
+
+    def test_current_year_has_balances_when_latest_attendance_is_last_year(self):
+        self.seed.seed(today=date(2028, 1, 1))
+        self.assertEqual(self._attendance_bounds()[1], date(2027, 12, 31))
+        for emp_id in self.db.list_employee_ids():
+            self.assertIsNotNone(self.db.get_leave_balance(emp_id, 2028), emp_id)
+
+    def test_pin_is_independent_of_wall_clock_year(self):
+        with patch.dict(os.environ, {"HR_HISTORY_START": "2025-12-22"}):
+            self.seed.seed(today=date(2026, 9, 8))
+            first = _fixture_bytes(_raw_tables(self.db))
+            self.seed.seed(today=date(2035, 1, 1))
+        self.assertEqual(first, _fixture_bytes(_raw_tables(self.db)))
+
+    def test_invalid_or_wrong_weekday_pin_is_rejected_without_reset(self):
+        self.seed.seed()
+        before = _raw_tables(self.db)
+        for value in ("2026-07-07", "20260706", "2026-W28-1",
+                      "2026-07-06T00:00:00", "not-a-date"):
+            with self.subTest(pin=value), patch.dict(os.environ, {"HR_HISTORY_START": value}):
+                with self.assertRaisesRegex(ValueError, "HR_HISTORY_START"):
+                    self.seed.seed()
+            self.assertEqual(_raw_tables(self.db), before)
+
+    def test_two_boots_on_same_day_are_identical_and_reset_external_writes(self):
+        self.seed.seed(today=date(2026, 9, 8))
+        before = _fixture_bytes(_raw_tables(self.db))
+        self.db.hire_employee("임시 사원", "D200", "P3")
+        self.seed.seed(today=date(2026, 9, 8))
+        self.assertEqual(before, _fixture_bytes(_raw_tables(self.db)))
+
+    def test_loading_uses_no_rng_and_never_changes_the_fixture_file(self):
+        before = self.seed.DATASET_PATH.read_bytes()
+        with patch("random.Random", side_effect=AssertionError("boot must not generate data")):
+            self.seed.seed()
+        self.assertEqual(self.seed.DATASET_PATH.read_bytes(), before)
+        self.assertEqual(self.db.counts()["attendance"], 310)
+
+    def test_pinning_original_start_reproduces_every_fixture_byte(self):
+        with patch.dict(os.environ, {"HR_HISTORY_START": "2026-07-06"}):
+            self.seed.seed()
+        self.assertEqual(_fixture_bytes(_raw_tables(self.db)),
+                         self.seed.DATASET_PATH.read_bytes())
+
+    def test_failed_insert_rolls_back_the_entire_reset(self):
+        self.seed.seed()
+        before = _raw_tables(self.db)
+        broken = self.seed.load_dataset()
+        broken["course"].append(broken["course"][0])
+        path = Path(self.db.get_db_path()).with_suffix(".json")
+        path.write_bytes(_fixture_bytes(broken))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.seed.seed(path=path)
+        self.assertEqual(_raw_tables(self.db), before)
+
+    def test_malformed_fixture_does_not_erase_existing_rows(self):
+        self.seed.seed()
+        before = _raw_tables(self.db)
+        for defect in ("missing_table", "wrong_row_width", "no_attendance"):
+            broken = self.seed.load_dataset()
+            if defect == "missing_table":
+                del broken["course"]
+            elif defect == "wrong_row_width":
+                broken["course"][0].append("invalid")
+            else:
+                broken["attendance"] = []
+            path = Path(self.db.get_db_path()).with_suffix(".json")
+            path.write_bytes(_fixture_bytes(broken))
+            with self.subTest(defect=defect), self.assertRaises(ValueError):
+                self.seed.seed(path=path)
+            self.assertEqual(_raw_tables(self.db), before)
+
+
+class DatasetLiteralTests(unittest.TestCase):
+    def setUp(self):
+        from hr_core import db, generate, seed
+        self.db, self.generate, self.seed = db, generate, seed
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.path = Path(temporary.name)
+        environment = patch.dict(os.environ, {
+            "HR_DB_PATH": str(self.path / "protected.db"),
+            "HR_HISTORY_START": "2026-07-06",
+        })
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def test_fixture_matches_deployed_bytes_except_the_two_corrected_date_columns(self):
+        tables = self.seed.load_dataset()
+        tables["leave_request"] = [row[:9] for row in tables["leave_request"]]
+        # Captured from all nine live tables on 2026-09-08, projected in schema order.
+        self.assertEqual(hashlib.sha256(_fixture_bytes(tables)).hexdigest(),
+                         "6b95becf1a62b6c1631db5d3956667123dc2e72211e15fba8063de903b5726aa")
+
+    def test_leave_dates_are_explicit_weekly_offsets_not_boot_dates(self):
+        for row in self.seed.load_dataset()["leave_request"]:
+            start = date.fromisoformat(row[3])
+            self.assertEqual(start - date.fromisoformat(row[9]), timedelta(days=14))
+            if row[7] == "신청":
+                self.assertIsNone(row[10])
+            else:
+                self.assertEqual(start - date.fromisoformat(row[10]), timedelta(days=7))
+
+    def test_generator_reproduces_literal_without_touching_callers_database(self):
+        self.seed.seed()
+        self.db.hire_employee("보호 대상", "D200", "P3")
+        before = _raw_tables(self.db)
+        database_path = os.environ["HR_DB_PATH"]
+        generated = self.generate.dump()
+        self.assertEqual(os.environ["HR_DB_PATH"], database_path)
+        self.assertEqual(_raw_tables(self.db), before)
+        self.assertEqual(_fixture_bytes(generated), self.seed.DATASET_PATH.read_bytes())
+
+    def test_generator_restores_environment_after_failure(self):
+        previous = os.environ["HR_DB_PATH"]
+        with patch.object(self.generate, "build", side_effect=ValueError("generation failed")):
+            with self.assertRaisesRegex(ValueError, "generation failed"):
+                self.generate.dump()
+        self.assertEqual(os.environ["HR_DB_PATH"], previous)
+
+    def test_generator_dates_do_not_depend_on_the_wall_clock(self):
+        with patch.object(self.db, "_today", return_value="2035-12-31"), \
+                patch.object(self.db, "_current_year", return_value=2035):
+            generated = self.generate.dump()
+        self.assertEqual(_fixture_bytes(generated), self.seed.DATASET_PATH.read_bytes())
+
+    def test_generator_requires_force_even_when_output_does_not_exist(self):
+        target = self.path / "dataset.json"
+        for exists in (False, True):
+            if exists:
+                target.write_text("keep this fixture")
+            errors = io.StringIO()
+            with patch.object(self.generate, "DATASET_PATH", target), redirect_stderr(errors):
+                self.assertEqual(self.generate.main([]), 1)
+            self.assertIn("--force", errors.getvalue())
+            if exists:
+                self.assertEqual(target.read_text(), "keep this fixture")
+            else:
+                self.assertFalse(target.exists())
+
+    def test_generator_force_writes_the_literal(self):
+        target = self.path / "dataset.json"
+        with patch.object(self.generate, "DATASET_PATH", target), redirect_stdout(io.StringIO()):
+            self.assertEqual(self.generate.main(["--force"]), 0)
+        self.assertEqual(target.read_bytes(), self.seed.DATASET_PATH.read_bytes())
 
 
 if __name__ == "__main__":

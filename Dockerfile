@@ -1,5 +1,5 @@
 # Single app image with THREE entrypoints (selected via command override):
-#   init : python -m hr_core.seed                        (bootstrap shared SQLite)
+#   init : python -m hr_core.seed                        (reset from literal fixture)
 #   api  : uvicorn api.main:app --host 0.0.0.0 --port 8000 (web console + REST)
 #   mcp  : python -m mcp_server                          (MCP streamable HTTP :8001)
 FROM python:3.12-slim
