@@ -2,7 +2,7 @@
 //
 // ONE Container App, ONE always-on replica. All containers share an EmptyDir
 // volume mounted at /data holding the SQLite DB:
-//   init container 'seed' -> bootstraps /data/hr.db if empty, before app start
+//   init container 'seed' -> resets /data/hr.db from the fixture before app start
 //   'api'  container       -> FastAPI web console + REST on :8000
 //   'mcp'  container       -> MCP streamable-HTTP on :8001 (/mcp)
 //   'proxy' container      -> Caddy, the single external ingress on :8080
@@ -14,8 +14,7 @@
 //     wipes everything;
 //   * a new revision starts a new replica, so redeploying resets the dataset
 //     back to the seeded snapshot.
-// The seed itself is a bootstrap, not a reset: it leaves a populated DB alone
-// unless run with --force / HR_SEED_FORCE=1, so restarts do not destroy data.
+// The seed always resets, including when a previous SQLite file still exists.
 // For durability across redeploys, replace this volume with an Azure Files
 // share -- note SQLite's WAL journal does not work over SMB, so hr_core.db
 // would also need journal_mode switched away from WAL.
@@ -42,16 +41,23 @@ param revisionSuffix string = 'r${utcNow('yyMMddHHmmss')}'
 @description('Demo API key required in the X-API-Key header on all REST /api/* and MCP /mcp calls. Web console + /api/docs stay open.')
 param apiKey string = 'changjuahn'
 
-@description('Minimum replicas. Keep at 1: the SQLite DB sits on an ephemeral EmptyDir volume, so scaling to zero destroys every row written since the replica started. Set 0 only if resetting to the seeded snapshot on every idle period is acceptable.')
-@minValue(0)
+@description('One replica is required: scaling to zero would discard external writes after an idle period.')
+@minValue(1)
 @maxValue(1)
 param minReplicas int = 1
+
+@description('Optional HR_HISTORY_START: first attendance date, YYYY-MM-DD, same weekday as fixture 2026-07-06 (Monday). Empty means recent history anchored by latest attendance in whole weeks.')
+param historyStart string = ''
 
 var dbPath = '/data/hr.db'
 var dbEnv = [
   {
     name: 'HR_DB_PATH'
     value: dbPath
+  }
+  {
+    name: 'HR_HISTORY_START'
+    value: historyStart
   }
 ]
 // api + mcp additionally get the demo API key; the seed init container does not need it.

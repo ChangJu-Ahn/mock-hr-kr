@@ -27,9 +27,9 @@
       <tbody>
         <tr><td>대상</td><td>사람이 짜는 코드 · HTTP 클라이언트</td><td>AI 에이전트 · LLM 클라이언트</td></tr>
         <tr><td>엔드포인트</td><td><code>/api/…</code> (리소스별 경로)</td><td><code data-mcp-url>{{ spec.server.endpoint }}</code> (단일 경로)</td></tr>
-        <tr><td>호출 방식</td><td>GET/POST + 경로 + 쿼리</td><td>JSON-RPC <code>tools/call</code> + 도구 이름</td></tr>
+        <tr><td>호출 방식</td><td>GET/POST/PATCH/DELETE + 경로 + 쿼리</td><td>JSON-RPC <code>tools/call</code> + 도구 이름</td></tr>
         <tr><td>스펙 문서</td><td>OpenAPI (<a href="/api/docs">/api/docs</a>)</td><td><code>tools/list</code> (이 페이지)</td></tr>
-        <tr><td>담당 업무</td><td>사원 · 부서 · 직급 · 교육 · 인사발령</td><td>근태 · 연차·휴가 (+ 사원 조회)</td></tr>
+        <tr><td>담당 업무</td><td>기준정보 CRUD · 교육이력 · 인사발령</td><td>근태 · 연차·휴가 · 사원/부서/직급/과정 CRUD</td></tr>
         <tr><td>인증</td><td colspan="2">공통 — 헤더 <code>{{ spec.server.auth.header }}: {{ spec.server.auth.key }}</code></td></tr>
       </tbody>
     </table>
@@ -37,6 +37,8 @@
   <p class="muted">
     두 창구는 <strong>같은 SQLite DB</strong>를 바라봅니다. MCP로 기록한 근태는 웹 콘솔
     <a href="/attendance">근태</a> 화면에서 바로 확인할 수 있습니다.
+    기준정보 수정도 REST와 화면에 즉시 반영됩니다. 키는 수정할 수 없고 참조 중인 삭제는
+    <code>{"error": "cannot delete ...: still referenced by ..."}</code>로 차단합니다.
   </p>
 </section>
 

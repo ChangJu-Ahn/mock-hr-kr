@@ -1,0 +1,346 @@
+"""Author dataset.json deliberately; never run this module at application boot.
+
+    python -m hr_core.generate --force
+
+The literal fixture is the runtime source of truth. Regeneration can change
+external consumers' attendance windows, so the command requires --force.
+Generation uses a disposable database and never resets HR_DB_PATH.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import random
+import sys
+import tempfile
+from datetime import date, timedelta
+from pathlib import Path
+
+from . import db
+
+DATASET_PATH = Path(__file__).resolve().parent / "dataset.json"
+
+# Fixed "today" for the demo so counts and dates are fully reproducible.
+REFERENCE_DATE = date(2026, 7, 17)
+BASE_YEAR = REFERENCE_DATE.year
+
+# --------------------------------------------------------------------------- #
+# Master data
+# --------------------------------------------------------------------------- #
+
+# (dept_code, dept_name, parent_dept_code, cost_center)  -- manager set later
+DEPARTMENTS = [
+    ("D000", "대표이사",       None,   "CC-000"),
+    ("D100", "경영지원본부",   "D000", "CC-100"),
+    ("D110", "인사팀",         "D100", "CC-110"),
+    ("D120", "재무팀",         "D100", "CC-120"),
+    ("D200", "개발본부",       "D000", "CC-200"),
+    ("D210", "플랫폼개발팀",   "D200", "CC-210"),
+    ("D220", "앱개발팀",       "D200", "CC-220"),
+    ("D300", "영업본부",       "D000", "CC-300"),
+    ("D310", "국내영업팀",     "D300", "CC-310"),
+    ("D320", "해외영업팀",     "D300", "CC-320"),
+]
+
+# (position_code, position_name, level_no, min_leave_days)
+POSITIONS = [
+    ("P1", "사원",   1, 15.0),
+    ("P2", "주임",   2, 15.0),
+    ("P3", "대리",   3, 15.0),
+    ("P4", "과장",   4, 16.0),
+    ("P5", "차장",   5, 17.0),
+    ("P6", "부장",   6, 18.0),
+    ("P7", "이사",   7, 20.0),
+]
+
+# (course_code, course_name, category, delivery, hours, capacity, is_mandatory)
+COURSES = [
+    ("C001", "정보보안 기본",          "법정필수", "온라인", 2.0,  999, 1),
+    ("C002", "직장 내 괴롭힘 예방",     "법정필수", "온라인", 1.0,  999, 1),
+    ("C003", "성희롱 예방 교육",        "법정필수", "온라인", 1.0,  999, 1),
+    ("C004", "개인정보보호 교육",       "법정필수", "온라인", 2.0,  999, 1),
+    ("C005", "산업안전보건 교육",       "법정필수", "집합",   3.0,  40,  1),
+    ("C006", "Python 실무",            "직무",     "온라인", 16.0, 60,  0),
+    ("C007", "클라우드 아키텍처",       "직무",     "집합",   24.0, 24,  0),
+    ("C008", "신임 리더십 과정",        "리더십",   "집합",   8.0,  20,  0),
+    ("C009", "비즈니스 영어",           "어학",     "온라인", 40.0, 50,  0),
+    ("C010", "데이터 분석 입문",        "직무",     "외부",   12.0, 30,  0),
+]
+
+# (name, dept_code, position_code, employment_type, hire_date, manager_name)
+EMPLOYEES = [
+    ("김대표", "D000", "P7", "정규직", "2015-03-02", None),
+    # 경영지원본부
+    ("이경영", "D100", "P6", "정규직", "2016-05-10", "김대표"),
+    ("박인사", "D110", "P5", "정규직", "2017-04-03", "이경영"),
+    ("최채용", "D110", "P4", "정규직", "2018-07-16", "박인사"),
+    ("정노무", "D110", "P3", "정규직", "2019-09-02", "박인사"),
+    ("강교육", "D110", "P1", "정규직", "2023-03-06", "박인사"),
+    ("지신입", "D110", "P1", "인턴",   "2026-01-05", "박인사"),
+    ("윤재무", "D120", "P5", "정규직", "2017-06-01", "이경영"),
+    ("임회계", "D120", "P4", "정규직", "2019-02-11", "윤재무"),
+    ("한세무", "D120", "P2", "정규직", "2021-08-23", "윤재무"),
+    ("소재무", "D120", "P1", "계약직", "2024-04-01", "윤재무"),
+    # 개발본부
+    ("오개발", "D200", "P6", "정규직", "2016-08-22", "김대표"),
+    ("서플랫", "D210", "P5", "정규직", "2018-01-15", "오개발"),
+    ("신백엔", "D210", "P4", "정규직", "2019-05-20", "서플랫"),
+    ("권프론", "D210", "P3", "정규직", "2020-11-09", "서플랫"),
+    ("황데브", "D210", "P1", "정규직", "2022-06-13", "서플랫"),
+    ("안클라", "D210", "P2", "계약직", "2023-10-04", "서플랫"),
+    ("마개발", "D210", "P1", "정규직", "2024-02-19", "서플랫"),
+    ("천플랫", "D210", "P2", "정규직", "2021-03-08", "서플랫"),
+    ("송앱장", "D220", "P5", "정규직", "2018-03-26", "오개발"),
+    ("배안드", "D220", "P4", "정규직", "2019-11-18", "송앱장"),
+    ("조아이", "D220", "P3", "정규직", "2021-01-25", "송앱장"),
+    ("남모바", "D220", "P1", "인턴",   "2025-12-01", "송앱장"),
+    ("유테스", "D220", "P1", "정규직", "2023-07-10", "송앱장"),
+    # 영업본부
+    ("문영업", "D300", "P6", "정규직", "2016-10-04", "김대표"),
+    ("백국내", "D310", "P5", "정규직", "2018-05-14", "문영업"),
+    ("노세일", "D310", "P4", "정규직", "2019-08-19", "백국내"),
+    ("심고객", "D310", "P3", "정규직", "2020-12-07", "백국내"),
+    ("하영업", "D310", "P2", "정규직", "2022-02-21", "백국내"),
+    ("여영업", "D310", "P1", "정규직", "2024-09-02", "백국내"),
+    ("구해외", "D320", "P5", "정규직", "2018-09-03", "문영업"),
+    ("표글로", "D320", "P4", "정규직", "2020-04-27", "구해외"),
+    ("진수출", "D320", "P3", "정규직", "2021-10-12", "구해외"),
+    ("방통상", "D320", "P1", "계약직", "2024-06-17", "구해외"),
+]
+
+# dept_code -> manager name (set on department after employees exist)
+DEPT_MANAGERS = {
+    "D000": "김대표", "D100": "이경영", "D110": "박인사", "D120": "윤재무",
+    "D200": "오개발", "D210": "서플랫", "D220": "송앱장",
+    "D300": "문영업", "D310": "백국내", "D320": "구해외",
+}
+
+# Extra personnel actions beyond the auto 입사 records.
+# (name, type, to_dept, to_position, effective_date, note)
+EXTRA_APPOINTMENTS = [
+    ("강교육", "승진",     None,   "P2", "2026-01-01", "정기 승진"),
+    ("정노무", "승진",     None,   "P4", "2026-01-01", "정기 승진"),
+    ("조아이", "부서이동", "D210", None, "2026-03-02", "플랫폼개발팀 전배"),
+    ("유테스", "부서이동", "D310", None, "2026-04-01", "국내영업팀 전배"),
+    ("한세무", "휴직",     None,   None, "2026-02-10", "육아휴직"),
+    ("한세무", "복직",     None,   None, "2026-06-15", "육아휴직 복직"),
+    ("지신입", "휴직",     None,   None, "2026-05-06", "개인사유 휴직"),
+    ("남모바", "퇴직",     None,   None, "2026-06-30", "인턴 계약 만료"),
+    ("방통상", "퇴직",     None,   None, "2026-05-20", "계약 만료"),
+]
+
+LEAVE_TYPES = ["연차", "연차", "연차", "반차", "병가", "경조사"]
+LEAVE_REASONS = ["개인 사유", "가족 행사", "병원 진료", "휴식", "경조사 참석", "여행"]
+CHECK_INS = ["08:32", "08:45", "08:51", "08:58", "09:03", "08:40", "09:12", "08:55"]
+CHECK_OUTS = ["18:02", "18:15", "18:30", "19:05", "17:48", "18:45", "20:10", "18:20"]
+
+
+def _weekdays(end: date, n: int) -> list[str]:
+    """The ``n`` most recent weekdays up to and including ``end`` (ascending)."""
+    out: list[str] = []
+    d = end
+    while len(out) < n:
+        if d.weekday() < 5:  # Mon-Fri
+            out.append(d.isoformat())
+        d -= timedelta(days=1)
+    return list(reversed(out))
+
+
+def _insert_master() -> None:
+    with db.get_conn() as conn:
+        conn.executemany(
+            "INSERT INTO department (dept_code, dept_name, parent_dept_code, cost_center)"
+            " VALUES (?,?,?,?)",
+            DEPARTMENTS,
+        )
+        conn.executemany(
+            "INSERT INTO position (position_code, position_name, level_no, min_leave_days)"
+            " VALUES (?,?,?,?)",
+            POSITIONS,
+        )
+        conn.executemany(
+            "INSERT INTO course (course_code, course_name, category, delivery, hours,"
+            " capacity, is_mandatory) VALUES (?,?,?,?,?,?,?)",
+            COURSES,
+        )
+
+
+def _hire_all() -> dict[str, str]:
+    """Hire every employee (top-down so managers exist first). Returns name->emp_id."""
+    emp_map: dict[str, str] = {}
+    for n, (name, dept, pos, emp_type, hire_date, mgr_name) in enumerate(EMPLOYEES, start=1):
+        emp = db.hire_employee(
+            name=name, dept_code=dept, position_code=pos, employment_type=emp_type,
+            email=f"user{n:02d}@mock-hr.example",
+            phone=f"010-{3000 + n:04d}-{1000 + (n * 7) % 9000:04d}",
+            hire_date=hire_date,
+            birth_date=f"19{75 + (n % 20):02d}-{(n % 12) + 1:02d}-{(n % 27) + 1:02d}",
+            manager_emp_id=emp_map.get(mgr_name) if mgr_name else None,
+            year=BASE_YEAR,
+        )
+        emp_map[name] = emp["emp_id"]
+
+    # Wire department managers now that employees exist.
+    with db.get_conn() as conn:
+        for dept_code, mgr_name in DEPT_MANAGERS.items():
+            conn.execute(
+                "UPDATE department SET manager_emp_id = ? WHERE dept_code = ?",
+                (emp_map[mgr_name], dept_code),
+            )
+    return emp_map
+
+
+def _apply_appointments(emp_map: dict[str, str]) -> None:
+    for name, atype, to_dept, to_pos, eff, note in EXTRA_APPOINTMENTS:
+        db.create_appointment(
+            emp_map[name], atype, effective_date=eff,
+            to_dept=to_dept, to_position=to_pos, note=note,
+        )
+
+
+def _seed_training(active_ids: list[str], rnd: random.Random) -> None:
+    mandatory = [c[0] for c in COURSES if c[6] == 1]
+    elective = [c[0] for c in COURSES if c[6] == 0]
+
+    # Every active employee is enrolled in all legally-required courses.
+    for emp_id in active_ids:
+        for course_code in mandatory:
+            rec = db.enroll_training(emp_id, course_code,
+                                     enroll_date=f"{BASE_YEAR}-01-15")
+            r = rnd.random()
+            if r < 0.80:
+                db.complete_training(rec["id"], "이수",
+                                     complete_date=f"{BASE_YEAR}-02-05")
+            elif r < 0.93:
+                pass  # still 수강중
+            else:
+                db.complete_training(rec["id"], "미이수",
+                                     complete_date=f"{BASE_YEAR}-02-05")
+
+    # Electives: a self-selected subset enrolls, most finish with a score.
+    for course_code in elective:
+        for emp_id in active_ids:
+            if rnd.random() < 0.28:
+                rec = db.enroll_training(emp_id, course_code,
+                                         enroll_date=f"{BASE_YEAR}-03-10")
+                if rnd.random() < 0.65:
+                    db.complete_training(rec["id"], "이수",
+                                         score=rnd.randint(70, 100),
+                                         complete_date=f"{BASE_YEAR}-04-20")
+
+
+def _seed_leave(emp_map: dict[str, str], active_ids: list[str], rnd: random.Random) -> None:
+    name_by_id = {v: k for k, v in emp_map.items()}
+    mgr_by_name = {name: mgr for name, *_rest, mgr in
+                   ((e[0], e[5]) for e in EMPLOYEES)}
+    leave_pool = _weekdays(REFERENCE_DATE - timedelta(days=7), 40)
+
+    forced_pending = set(rnd.sample(active_ids, k=min(4, len(active_ids))))
+
+    for emp_id in active_ids:
+        if emp_id not in forced_pending and rnd.random() > 0.55:
+            continue
+        ltype = rnd.choice(LEAVE_TYPES)
+        start = rnd.choice(leave_pool)
+        sd = date.fromisoformat(start)
+        if ltype == "반차":
+            end = start
+        else:
+            end = (sd + timedelta(days=rnd.choice([0, 0, 1, 2]))).isoformat()
+        req = db.submit_leave_request(
+            emp_id, ltype, start, end,
+            reason=rnd.choice(LEAVE_REASONS),
+            applied_date=(sd - timedelta(days=14)).isoformat(),
+        )
+        if emp_id in forced_pending:
+            continue  # leave as 신청 for the approval queue
+        r = rnd.random()
+        approver_name = mgr_by_name.get(name_by_id.get(emp_id))
+        approver = emp_map.get(approver_name) if approver_name else None
+        if r < 0.82:
+            db.decide_leave_request(
+                req["id"], "승인", approver_emp_id=approver,
+                decided_date=(sd - timedelta(days=7)).isoformat(),
+            )
+        elif r < 0.92:
+            db.decide_leave_request(
+                req["id"], "반려", approver_emp_id=approver,
+                decided_date=(sd - timedelta(days=7)).isoformat(),
+            )
+        # else: remains 신청
+
+
+def _seed_attendance(active_ids: list[str], rnd: random.Random) -> None:
+    workdays = _weekdays(REFERENCE_DATE, 10)
+    for emp_id in active_ids:
+        for wd in workdays:
+            r = rnd.random()
+            if r < 0.03:
+                db.log_attendance(emp_id, wd, status="휴가")
+            elif r < 0.05:
+                db.log_attendance(emp_id, wd, status="결근")
+            elif r < 0.12:
+                db.log_attendance(emp_id, wd, check_in="09:00", check_out="18:00",
+                                  status="재택")
+            else:
+                db.log_attendance(emp_id, wd,
+                                  check_in=rnd.choice(CHECK_INS),
+                                  check_out=rnd.choice(CHECK_OUTS))
+
+
+def build() -> None:
+    """Replay the historical RNG draws into the generator's temporary DB."""
+    rnd = random.Random(42)
+    db.reset_db()
+    _insert_master()
+    emp_map = _hire_all()
+    _apply_appointments(emp_map)
+
+    active_ids = db.list_employee_ids(status="재직")
+    _seed_training(active_ids, rnd)
+    _seed_leave(emp_map, active_ids, rnd)
+    _seed_attendance(active_ids, rnd)
+
+
+def dump() -> dict[str, list[list]]:
+    """Generate raw rows without touching the caller's database or environment."""
+    with tempfile.TemporaryDirectory() as temporary:
+        previous = os.environ.get("HR_DB_PATH")
+        os.environ["HR_DB_PATH"] = str(Path(temporary) / "generate.db")
+        try:
+            build()
+            tables = {}
+            with db.get_conn() as conn:
+                for table in reversed(db.TABLES):
+                    columns = [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
+                    order = ", ".join(f'"{column}"' for column in columns)
+                    tables[table] = [list(row) for row in conn.execute(
+                        f"SELECT * FROM {table} ORDER BY {order}")]
+            return tables
+        finally:
+            if previous is None:
+                os.environ.pop("HR_DB_PATH", None)
+            else:
+                os.environ["HR_DB_PATH"] = previous
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--force", action="store_true",
+                        help="rewrite dataset.json; review every changed history window")
+    args = parser.parse_args(argv)
+    if not args.force:
+        print("[generate] refusing to rewrite dataset.json without --force; "
+              "regeneration can change external attendance windows.", file=sys.stderr)
+        return 1
+    tables = dump()
+    DATASET_PATH.write_text(
+        json.dumps(tables, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    print(f"[generate] wrote {DATASET_PATH} ({sum(map(len, tables.values()))} rows)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

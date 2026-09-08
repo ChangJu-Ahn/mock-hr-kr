@@ -1,12 +1,19 @@
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette import status
+from starlette.concurrency import run_in_threadpool
+from pydantic import ValidationError
 
 from api import mcp_docs
+from api.rest import (
+    CourseCreate, CourseUpdate, DepartmentCreate, DepartmentUpdate,
+    EmployeeCreate, EmployeeUpdate, PositionCreate, PositionUpdate,
+)
 from hr_core import db
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -35,17 +42,65 @@ def _context(request: Request, **extra: Any) -> dict[str, Any]:
 
 
 def _redirect(path: str, *, message: str | None = None, error: str | None = None):
-    q = []
+    query = {}
     if message:
-        q.append(f"message={message}")
+        query["message"] = message
     if error:
-        q.append(f"error={error}")
-    sep = "?" if q else ""
-    return RedirectResponse(path + sep + "&".join(q), status_code=_SEE_OTHER)
+        query["error"] = error
+    return RedirectResponse(path + ("?" + urlencode(query) if query else ""), status_code=_SEE_OTHER)
 
 
 def _emp_options() -> list[dict[str, Any]]:
     return db.list_employees(limit=1000)
+
+
+_MASTER_FORMS = {
+    "departments": (DepartmentCreate, DepartmentUpdate, "department", "dept_code", "dept_name"),
+    "positions": (PositionCreate, PositionUpdate, "position", "position_code", "position_name"),
+    "courses": (CourseCreate, CourseUpdate, "course", "course_code", "course_name"),
+    "employees": (EmployeeCreate, EmployeeUpdate, "employee", "emp_id", "name"),
+}
+
+
+async def _master_form(request: Request, collection: str, identifier: str | None = None):
+    create_model, update_model, entity, key, name = _MASTER_FORMS[collection]
+    target = f"/employees/{identifier}" if collection == "employees" and identifier else f"/{collection}"
+    try:
+        values = {}
+        for field, value in (await request.form()).multi_items():
+            if field in values:
+                raise ValueError(f"duplicate form field: {field}")
+            if not isinstance(value, str):
+                raise ValueError("master-data forms do not accept file uploads")
+            values[field] = _blank_to_none(value)
+        model = update_model if identifier is not None else create_model
+        payload = model.model_validate(values).model_dump(exclude_unset=True)
+        if identifier is None:
+            action = db.hire_employee if entity == "employee" else getattr(db, f"create_{entity}")
+            row = await run_in_threadpool(action, **payload)
+        else:
+            row = await run_in_threadpool(getattr(db, f"update_{entity}"), identifier, **payload)
+    except ValidationError as exc:
+        reason = "; ".join(f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+                           for error in exc.errors())
+        return _redirect(target, error=reason)
+    except db.NotFoundError as exc:
+        return _redirect(f"/{collection}", error=str(exc))
+    except ValueError as exc:
+        return _redirect(target, error=str(exc))
+    return _redirect(target, message=f"{row[key]} {row[name]} 저장됨")
+
+
+def _master_delete(collection: str, identifier: str):
+    entity = _MASTER_FORMS[collection][2]
+    try:
+        getattr(db, f"delete_{entity}")(identifier)
+    except db.NotFoundError as exc:
+        return _redirect(f"/{collection}", error=str(exc))
+    except ValueError as exc:
+        target = f"/employees/{identifier}" if collection == "employees" else f"/{collection}"
+        return _redirect(target, error=str(exc))
+    return _redirect(f"/{collection}", message=f"{identifier} 삭제됨")
 
 
 # --------------------------------------------------------------------------- #
@@ -98,15 +153,28 @@ def employees_hire(name: str = Form(...), dept_code: str = Form(...),
         )
     except ValueError as exc:
         return _redirect("/employees", error=str(exc))
-    return _redirect("/employees", message=f"{emp['emp_id']}+{name}+입사+처리됨")
+    return _redirect("/employees", message=f"{emp['emp_id']} {name} 입사 처리됨")
 
 
 @router.get("/employees/{emp_id}")
-def employee_detail(request: Request, emp_id: str):
+def employee_detail(request: Request, emp_id: str, message: str | None = None,
+                    error: str | None = None):
     emp = db.get_employee(emp_id)
     if emp is None:
         raise HTTPException(status_code=404, detail="employee not found")
-    return templates.TemplateResponse(request, "employee_detail.html", _context(request, emp=emp))
+    return templates.TemplateResponse(request, "employee_detail.html", _context(
+        request, emp=emp, departments=db.list_departments(), positions=db.list_positions(),
+        managers=_emp_options(), message=message, error=error))
+
+
+@router.post("/employees/{emp_id}/update")
+async def employees_update(request: Request, emp_id: str):
+    return await _master_form(request, "employees", emp_id)
+
+
+@router.post("/employees/{emp_id}/delete")
+def employees_delete(emp_id: str):
+    return _master_delete("employees", emp_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -114,15 +182,46 @@ def employee_detail(request: Request, emp_id: str):
 # --------------------------------------------------------------------------- #
 
 @router.get("/departments")
-def departments(request: Request):
+def departments(request: Request, message: str | None = None, error: str | None = None):
     return templates.TemplateResponse(request, "departments.html", _context(
-        request, tree=db.get_org_tree(), headcounts=db.headcount_by_dept()))
+        request, tree=db.get_org_tree(), headcounts=db.headcount_by_dept(),
+        managers=_emp_options(), message=message, error=error))
+
+
+@router.post("/departments/create")
+async def departments_create(request: Request):
+    return await _master_form(request, "departments")
+
+
+@router.post("/departments/{dept_code}/update")
+async def departments_update(request: Request, dept_code: str):
+    return await _master_form(request, "departments", dept_code)
+
+
+@router.post("/departments/{dept_code}/delete")
+def departments_delete(dept_code: str):
+    return _master_delete("departments", dept_code)
 
 
 @router.get("/positions")
-def positions(request: Request):
+def positions(request: Request, message: str | None = None, error: str | None = None):
     return templates.TemplateResponse(request, "positions.html", _context(
-        request, rows=db.list_positions()))
+        request, rows=db.list_positions(), message=message, error=error))
+
+
+@router.post("/positions/create")
+async def positions_create(request: Request):
+    return await _master_form(request, "positions")
+
+
+@router.post("/positions/{position_code}/update")
+async def positions_update(request: Request, position_code: str):
+    return await _master_form(request, "positions", position_code)
+
+
+@router.post("/positions/{position_code}/delete")
+def positions_delete(position_code: str):
+    return _master_delete("positions", position_code)
 
 
 # --------------------------------------------------------------------------- #
@@ -146,6 +245,21 @@ def courses(request: Request, category: str | None = None, course_code: str | No
     ))
 
 
+@router.post("/courses/create")
+async def courses_create(request: Request):
+    return await _master_form(request, "courses")
+
+
+@router.post("/courses/{course_code}/update")
+async def courses_update(request: Request, course_code: str):
+    return await _master_form(request, "courses", course_code)
+
+
+@router.post("/courses/{course_code}/delete")
+def courses_delete(course_code: str):
+    return _master_delete("courses", course_code)
+
+
 @router.post("/courses/enroll")
 def courses_enroll(emp_id: str = Form(...), course_code: str = Form(...),
                    enroll_date: str | None = Form(None)):
@@ -154,7 +268,7 @@ def courses_enroll(emp_id: str = Form(...), course_code: str = Form(...),
                            enroll_date=_blank_to_none(enroll_date))
     except ValueError as exc:
         return _redirect("/courses", error=str(exc))
-    return _redirect("/courses", message="교육+수강신청+완료")
+    return _redirect("/courses", message="교육 수강신청 완료")
 
 
 @router.post("/courses/{record_id}/complete")
@@ -165,7 +279,7 @@ def courses_complete(record_id: int, status_value: str = Form("이수"),
                              score=_float_or_none(score))
     except ValueError as exc:
         return _redirect("/courses", error=str(exc))
-    return _redirect("/courses", message="교육+이수처리+완료")
+    return _redirect("/courses", message="교육 이수처리 완료")
 
 
 # --------------------------------------------------------------------------- #
@@ -197,9 +311,9 @@ def leave_submit(emp_id: str = Form(...), leave_type: str = Form(...),
                                       reason=_blank_to_none(reason))
     except ValueError as exc:
         return _redirect("/leave", error=str(exc))
-    note = f"휴가신청+등록됨+({res['days']}일)"
+    note = f"휴가신청 등록됨 ({res['days']}일)"
     if res.get("balance_warning"):
-        note += "+|+잔여부족+경고"
+        note += " | 잔여부족 경고"
     return _redirect("/leave", message=note)
 
 
@@ -211,7 +325,7 @@ def leave_decide(request_id: int, decision: str = Form(...),
                                 approver_emp_id=_blank_to_none(approver_emp_id))
     except ValueError as exc:
         return _redirect("/leave", error=str(exc))
-    return _redirect("/leave", message=f"휴가신청+{decision}+처리됨")
+    return _redirect("/leave", message=f"휴가신청 {decision} 처리됨")
 
 
 # --------------------------------------------------------------------------- #
@@ -247,7 +361,7 @@ def attendance_log(emp_id: str = Form(...), work_date: str = Form(...),
                           status=_blank_to_none(status_value))
     except ValueError as exc:
         return _redirect("/attendance", error=str(exc))
-    return _redirect("/attendance", message="근태+기록됨")
+    return _redirect("/attendance", message="근태 기록됨")
 
 
 # --------------------------------------------------------------------------- #
@@ -282,7 +396,7 @@ def appointments_create(emp_id: str = Form(...), type: str = Form(...),
                               to_position=_blank_to_none(to_position), note=_blank_to_none(note))
     except ValueError as exc:
         return _redirect("/appointments", error=str(exc))
-    return _redirect("/appointments", message=f"{type}+발령+처리됨")
+    return _redirect("/appointments", message=f"{type} 발령 처리됨")
 
 
 @router.get("/guide")

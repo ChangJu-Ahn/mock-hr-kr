@@ -8,7 +8,39 @@
   <h2 id="guide-overview-title">이게 뭔가요? What is this?</h2>
   <p>일반적인 인사관리 시스템(HRIS)을 흉내 낸 <strong>목업 HR</strong>입니다. 하나의 SQLite DB를 세 가지 창구로 노출합니다:
      사람용 <strong>웹 콘솔</strong>, 에이전트용 <strong>REST API</strong>, 에이전트용 <strong>MCP 서버</strong>.
-     콜드 스타트마다 데이터가 새로 시딩됩니다. 데모 전용이라 실제 보안은 없습니다.</p>
+     복제본 부팅 시 init이 <code>hr_core/dataset.json</code>을 읽어 <strong>항상 초기화</strong>합니다.
+     부팅 경로에서는 난수를 사용하지 않습니다. 데모 전용이라 실제 보안은 없습니다.</p>
+</section>
+
+<section class="content-card" aria-labelledby="guide-history-title">
+  <h2 id="guide-history-title">고정 데이터와 이동하는 이력 History</h2>
+  <p>픽스처의 값·식별자·간격은 고정됩니다. 부팅 시 <strong>최신 근태일</strong>을 기준으로
+     <code>Δ = 7 × floor((서버 오늘 − 픽스처의 최신 근태일) / 7)</code>만큼 날짜를 함께 옮깁니다.
+     최신 근태는 오늘보다 0~6일 전이며, 월~금 요일과 출퇴근 시각·근무시간·기록 간 간격이 그대로 유지됩니다.
+     약 198일의 운영 이력을 91일로 압축하거나 시작을 3개월 전으로 맞추지 않습니다.</p>
+  <p>근태일, 휴가 시작·종료·신청·결정일, 교육 신청·완료일, 발령일과 입사일이 함께 이동합니다.
+     <strong>생년월일은 이동하지 않으며</strong>, 입사일과 입사 발령일은 일치합니다.
+     휴가 신청일은 시작일 14일 전, 결정일은 7일 전으로 고정 생성하고 신청 상태의 결정일은 비워 둡니다.</p>
+  <p>연차잔액은 이동한 휴가의 <strong>사원·시작 연도</strong>별로 다시 계산합니다.
+     승인 휴가의 일수를 합산하고, 신청·반려를 포함한 모든 휴가에 해당 연도 잔액 행을 만듭니다.
+     기존 사원별 부여일수는 보존하며, 하나의 휴가를 연도별로 일할 분할하지 않습니다.</p>
+  <p><code>HR_HISTORY_START</code>는 <strong>첫 근태일</strong>을 고정하는 ISO 날짜입니다.
+     원본과 같은 월요일만 허용하며 다른 요일은 오류로 거부합니다.
+     <code>HR_HISTORY_START=2026-07-06</code>이면 원본 날짜,
+     <code>HR_HISTORY_START=2025-12-22</code>이면 근태가 2025-12-22~2026-01-02에 고정됩니다.
+     고정 모드의 기본 잔액 연도는 고정된 최신 근태의 연도입니다.
+     외부 시스템은 재시작 후 절대 날짜를 다시 조회해야 합니다.</p>
+  <p>픽스처 변경은 유지보수 명령 <code>python -m hr_core.generate --force</code>로만 의도적으로 수행합니다.
+     <code>--force</code> 없이는 덮어쓰지 않습니다. 생성기는 임시 DB를 사용하며 서비스 DB를 건드리지 않습니다.</p>
+</section>
+
+<section class="panel" aria-labelledby="guide-lifecycle-title">
+  <h2 id="guide-lifecycle-title">외부 쓰기와 초기화 Data lifecycle</h2>
+  <p><code>minReplicas=1</code>로 실행되므로 6분 이상 유휴 상태여도 외부 쓰기가 유지됩니다.
+     반면 <strong>복제본 재시작·재배포·seed 재실행은 초기화</strong>입니다.
+     <code>python -m hr_core.seed</code>는 기존 DB가 있어도 모든 HR 테이블을 원자적으로 복원합니다.
+     API/MCP 프로세스만 재시작하고 init을 다시 실행하지 않는 경우에는 초기화하지 않습니다.
+     EmptyDir 저장소이므로 영구 보관은 지원하지 않으며, 상시 실행 비용이 발생합니다.</p>
 </section>
 
 <section class="content-card" aria-labelledby="guide-flow-title">
@@ -64,10 +96,10 @@
     <table class="data-table">
       <thead><tr><th>기능</th><th>설명</th><th>창구</th></tr></thead>
       <tbody>
-        <tr><td>사원 정보</td><td>사원 목록·상세·입사</td><td>Web /employees · REST /api/employees</td></tr>
-        <tr><td>부서 관리</td><td>조직도·부서별 인원</td><td>Web /departments · REST /api/departments(/tree)</td></tr>
-        <tr><td>직급</td><td>직급·레벨·기본 연차</td><td>Web /positions · REST /api/positions</td></tr>
-        <tr><td>교육 관리</td><td>과정·수강신청·이수처리</td><td>Web /courses · REST /api/courses, /api/training-records</td></tr>
+        <tr><td>사원 정보</td><td>목록·상세·입사·수정·참조 없는 사원 삭제</td><td>Web /employees · REST /api/employees · MCP create_employee/update_employee/delete_employee</td></tr>
+        <tr><td>부서 관리</td><td>조직도·부서별 인원·생성·수정·삭제</td><td>Web /departments · REST /api/departments(/tree) · MCP create_department/update_department/delete_department</td></tr>
+        <tr><td>직급</td><td>직급·레벨·기본 연차·생성·수정·삭제</td><td>Web /positions · REST /api/positions · MCP create_position/update_position/delete_position</td></tr>
+        <tr><td>교육 관리</td><td>과정 생성·수정·삭제, 수강신청·이수처리</td><td>Web /courses · REST /api/courses, /api/training-records · MCP create_course/update_course/delete_course</td></tr>
         <tr><td>연차·휴가</td><td>휴가 신청·승인·잔여 연차</td><td>Web /leave · MCP submit_leave_request/decide_leave_request/get_leave_balance/list_leave_requests</td></tr>
         <tr><td>근태 관리</td><td>출퇴근 기록·요약</td><td>Web /attendance · MCP log_attendance/list_attendance/get_attendance_summary</td></tr>
         <tr><td>인사발령</td><td>승진·이동·휴복직·퇴직</td><td>Web /appointments · REST /api/appointments</td></tr>
@@ -76,17 +108,35 @@
   </div>
 </section>
 
+<section class="content-card" aria-labelledby="guide-crud-title">
+  <h2 id="guide-crud-title">기준정보 CRUD와 삭제 방어</h2>
+  <p>DB·REST·MCP·화면은 같은 쓰기 함수를 사용합니다. 사번과 부서·직급·과정 코드는 수정할 수 없습니다.
+     REST는 목록 주소에 <code>POST</code>, 개별 코드 주소에 <code>PATCH</code>·<code>DELETE</code>를 사용합니다.
+     MCP 수정 도구는 식별자와 <code>changes</code> 객체를 받습니다.
+     보내지 않은 필드는 유지되고, nullable 필드에 명시한 <code>null</code>은 값을 지웁니다.</p>
+  <p>참조 중인 기준정보는 Python에서 삭제를 차단합니다. 재직 사원뿐 아니라 퇴직자·하위 부서·관리자·교육·휴가·근태·발령 이력도 검사합니다.
+     REST는 <strong>409</strong>, MCP는 예외 대신 <code>{"error": "cannot delete ...: still referenced by ..."}</code>를 반환하며
+     어떤 기록이 몇 건 막는지 알려줍니다. 화면에도 같은 사유가 표시됩니다.</p>
+  <p>입사로 생성된 연차잔액과 입사 발령도 삭제 방어 대상이므로 새 사원 역시 참조가 있으면 삭제할 수 없습니다.
+     성공하는 생성→수정→삭제 테스트는 아직 참조가 없는 부서·직급·과정으로 수행할 수 있습니다.
+     이력을 연쇄 삭제하거나 전체 DB를 원격으로 지우는 기능은 없습니다.</p>
+</section>
+
 <section class="panel" aria-labelledby="guide-access-title">
   <h2 id="guide-access-title">에이전트 연결 Agent access</h2>
   <p>REST와 MCP는 헤더 <code>X-API-Key: changjuahn</code>가 필요합니다. 웹 콘솔과 <code>/api/docs</code>는 공개입니다.</p>
   <p><strong>REST</strong> (Employee·Department·Position·Course·Training·Appointment):</p>
   <pre>curl -H "X-API-Key: changjuahn" https://&lt;fqdn&gt;/api/employees
 curl -X POST -H "X-API-Key: changjuahn" -H "Content-Type: application/json" \
-     -d '{"name":"홍길동","dept_code":"D110","position_code":"P1"}' https://&lt;fqdn&gt;/api/employees</pre>
-  <p><strong>MCP</strong> (Attendance·Leave), streamable HTTP at <code>/mcp</code> with the same header. Tools:
+     -d '{"name":"홍길동","dept_code":"D110","position_code":"P1"}' https://&lt;fqdn&gt;/api/employees
+curl -X PATCH -H "X-API-Key: changjuahn" -H "Content-Type: application/json" \
+     -d '{"name":"김대표 외부수정"}' https://&lt;fqdn&gt;/api/employees/E0001</pre>
+  <p><strong>MCP</strong> (Attendance·Leave·기준정보 CRUD), streamable HTTP at <code>/mcp</code> with the same header. Operational tools:
      <code>log_attendance</code>, <code>list_attendance</code>, <code>get_attendance_summary</code>,
      <code>submit_leave_request</code>, <code>decide_leave_request</code>, <code>get_leave_balance</code>,
      <code>list_leave_requests</code>, <code>list_employees</code>, <code>get_employee</code>.</p>
+  <p>사원·부서·직급·과정의 생성·조회·수정·삭제 도구도 제공됩니다. MCP 수정 예시:</p>
+  <pre>{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"update_employee","arguments":{"emp_id":"E0001","changes":{"name":"김대표 외부수정"}}}}</pre>
   <p>Full REST reference: <a href="/api/docs">/api/docs</a>.
      Full MCP reference (도구 스펙·연결 설정): <a href="/mcp-docs">/mcp-docs</a>.</p>
 </section>

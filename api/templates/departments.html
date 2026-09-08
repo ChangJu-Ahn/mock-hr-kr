@@ -1,8 +1,20 @@
 {% extends "base.html" %}
 {% from "_ui.html" import page_header, empty_row %}
+{% from "_master_forms.html" import department_fields, master_actions %}
 {% block title %}부서 관리 · Mock HR{% endblock %}
 {% block content %}
 {{ page_header('부서 관리', '조직 구조와 부서 책임자, 코스트센터 현황을 확인합니다.', '조직') }}
+
+<details class="action-panel" id="department-create">
+  <summary>＋ 부서 생성</summary>
+  <div class="action-panel__body">
+    <p class="muted">코드는 수정할 수 없습니다. 사원·하위 부서·발령이 참조 중이면 삭제가 차단됩니다.</p>
+    <form method="post" action="/departments/create" class="row">
+      {{ department_fields({}, tree, managers, true) }}
+      <button type="submit">부서 생성</button>
+    </form>
+  </div>
+</details>
 
 <section class="content-card" aria-labelledby="department-tree-title">
   <h2 id="department-tree-title">조직도</h2>
@@ -18,6 +30,7 @@
           <th>부서장 이름</th>
           <th>코스트센터</th>
           <th>재직인원</th>
+          <th>관리</th>
         </tr>
       </thead>
       <tbody>
@@ -31,9 +44,12 @@
           <td>{{ d.manager_name or '—' }}</td>
           <td>{{ d.cost_center or '—' }}</td>
           <td>{{ d.headcount }}</td>
+          <td class="master-actions">
+            {% call master_actions('departments', d.dept_code) %}{{ department_fields(d, tree, managers) }}{% endcall %}
+          </td>
         </tr>
         {% else %}
-        {{ empty_row(8, '등록된 부서가 없습니다.') }}
+        {{ empty_row(9, '등록된 부서가 없습니다.') }}
         {% endfor %}
       </tbody>
     </table>

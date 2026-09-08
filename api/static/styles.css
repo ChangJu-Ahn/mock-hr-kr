@@ -61,6 +61,12 @@ p { line-height: 1.5; }
 .action-panel > summary { cursor: pointer; padding: .9rem 1rem; color: var(--sap-blue); font-weight: 700; }
 .action-panel[open] > summary { border-bottom: 1px solid var(--sap-border); }
 .action-panel__body { padding: 1rem; }
+.master-actions { white-space: nowrap; }
+.master-editor { display: inline-block; white-space: normal; }
+.master-editor > summary { color: var(--sap-blue); cursor: pointer; font-weight: 700; }
+.master-editor[open] { display: block; min-width: 22rem; margin-bottom: .75rem; }
+.master-editor form { padding-top: .75rem; }
+.master-delete { display: inline-flex; margin-left: .5rem; }
 .filter-bar, .filters, .row { display: flex; flex-wrap: wrap; gap: .75rem; align-items: end; }
 .filter-bar { margin-bottom: 1rem; padding: .8rem; background: #fff; border: 1px solid var(--sap-border); border-radius: .5rem; }
 .filters { margin-bottom: 1rem; }

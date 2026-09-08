@@ -16,6 +16,9 @@ dependencies = [
 [tool.setuptools]
 packages = ["hr_core", "api", "mcp_server"]
 
+[tool.setuptools.package-data]
+hr_core = ["dataset.json"]
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"

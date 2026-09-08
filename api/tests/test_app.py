@@ -510,7 +510,7 @@ class WebConsoleTests(unittest.TestCase):
         from mcp_server.server import mcp
 
         live = {t.name for t in asyncio.run(mcp.list_tools())}
-        self.assertEqual(len(live), 9)
+        self.assertEqual(len(live), 27)
 
         html = self.client.get("/mcp-docs").text
         spec = self.client.get("/mcp-docs/spec.json").json()

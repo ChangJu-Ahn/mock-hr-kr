@@ -1,7 +1,8 @@
 from typing import Any, Literal
+from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from api.auth import require_api_key
 from hr_core import db
@@ -109,7 +110,59 @@ class AppointmentRow(BaseModel):
     note: str | None = None
 
 
-class EmployeeCreate(BaseModel):
+class MasterInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+
+class DepartmentCreate(MasterInput):
+    dept_code: str
+    dept_name: str
+    parent_dept_code: str | None = None
+    manager_emp_id: str | None = None
+    cost_center: str | None = None
+
+
+class DepartmentUpdate(MasterInput):
+    dept_name: str | None = None
+    parent_dept_code: str | None = None
+    manager_emp_id: str | None = None
+    cost_center: str | None = None
+
+
+class PositionCreate(MasterInput):
+    position_code: str
+    position_name: str
+    level_no: int = Field(default=1, ge=1)
+    min_leave_days: float = Field(default=15, ge=0)
+
+
+class PositionUpdate(MasterInput):
+    position_name: str | None = None
+    level_no: int | None = Field(default=None, ge=1)
+    min_leave_days: float | None = Field(default=None, ge=0)
+
+
+class CourseCreate(MasterInput):
+    course_code: str
+    course_name: str
+    category: str | None = None
+    delivery: str | None = None
+    hours: float | None = Field(default=None, ge=0)
+    capacity: int | None = Field(default=None, ge=0)
+    is_mandatory: bool = False
+
+
+class CourseUpdate(MasterInput):
+    course_name: str | None = None
+    category: str | None = None
+    delivery: str | None = None
+    hours: float | None = Field(default=None, ge=0)
+    capacity: int | None = Field(default=None, ge=0)
+    is_mandatory: bool | None = None
+
+
+class EmployeeCreate(MasterInput):
+    emp_id: str | None = None
     name: str
     dept_code: str
     position_code: str
@@ -119,6 +172,30 @@ class EmployeeCreate(BaseModel):
     hire_date: str | None = None
     birth_date: str | None = None
     manager_emp_id: str | None = None
+
+
+class EmployeeUpdate(MasterInput):
+    name: str | None = None
+    dept_code: str | None = None
+    position_code: str | None = None
+    employment_type: EmploymentType | None = None
+    status: EmployeeStatus | None = None
+    email: str | None = None
+    phone: str | None = None
+    hire_date: str | None = None
+    birth_date: str | None = None
+    manager_emp_id: str | None = None
+
+
+def _master_write(action: Callable[..., dict[str, Any]], /, *args, **kwargs) -> dict[str, Any]:
+    try:
+        return action(*args, **kwargs)
+    except db.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except db.ConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 class TrainingCreate(BaseModel):
@@ -158,11 +235,20 @@ def api_index() -> dict[str, Any]:
             "GET /api/departments",
             "GET /api/departments/tree",
             "GET /api/departments/{dept_code}",
+            "POST /api/departments",
+            "PATCH|DELETE /api/departments/{dept_code}",
             "GET /api/positions",
+            "GET /api/positions/{position_code}",
+            "POST /api/positions",
+            "PATCH|DELETE /api/positions/{position_code}",
             "GET /api/employees",
             "GET /api/employees/{emp_id}",
             "POST /api/employees",
+            "PATCH|DELETE /api/employees/{emp_id}",
             "GET /api/courses",
+            "GET /api/courses/{course_code}",
+            "POST /api/courses",
+            "PATCH|DELETE /api/courses/{course_code}",
             "GET|POST /api/training-records",
             "POST /api/training-records/{id}/complete",
             "GET|POST /api/appointments",
@@ -198,9 +284,47 @@ def get_department(dept_code: str) -> dict[str, Any]:
     return row
 
 
+@router.post("/departments", response_model=DepartmentRow, status_code=201, tags=["Department"])
+def create_department(payload: DepartmentCreate):
+    return _master_write(db.create_department, **payload.model_dump())
+
+
+@router.patch("/departments/{dept_code}", response_model=DepartmentRow, tags=["Department"])
+def update_department(dept_code: str, payload: DepartmentUpdate):
+    return _master_write(db.update_department, dept_code, **payload.model_dump(exclude_unset=True))
+
+
+@router.delete("/departments/{dept_code}", tags=["Department"])
+def delete_department(dept_code: str):
+    return _master_write(db.delete_department, dept_code)
+
+
 @router.get("/positions", response_model=list[PositionRow], tags=["Position"])
 def get_positions() -> list[dict[str, Any]]:
     return db.list_positions()
+
+
+@router.get("/positions/{position_code}", response_model=PositionRow, tags=["Position"])
+def get_position(position_code: str):
+    row = db.get_position(position_code)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"position {position_code} not found")
+    return row
+
+
+@router.post("/positions", response_model=PositionRow, status_code=201, tags=["Position"])
+def create_position(payload: PositionCreate):
+    return _master_write(db.create_position, **payload.model_dump())
+
+
+@router.patch("/positions/{position_code}", response_model=PositionRow, tags=["Position"])
+def update_position(position_code: str, payload: PositionUpdate):
+    return _master_write(db.update_position, position_code, **payload.model_dump(exclude_unset=True))
+
+
+@router.delete("/positions/{position_code}", tags=["Position"])
+def delete_position(position_code: str):
+    return _master_write(db.delete_position, position_code)
 
 
 # --------------------------------------------------------------------------- #
@@ -235,15 +359,17 @@ def get_employee(emp_id: str) -> dict[str, Any]:
 @router.post("/employees", tags=["Employee"])
 def create_employee(payload: EmployeeCreate) -> dict[str, Any]:
     """입사 처리: 사원 등록 + 당해연도 연차 부여 + 입사 발령 기록(원자적)."""
-    try:
-        return db.hire_employee(
-            name=payload.name, dept_code=payload.dept_code,
-            position_code=payload.position_code, employment_type=payload.employment_type,
-            email=payload.email, phone=payload.phone, hire_date=payload.hire_date,
-            birth_date=payload.birth_date, manager_emp_id=payload.manager_emp_id,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    return _master_write(db.hire_employee, **payload.model_dump())
+
+
+@router.patch("/employees/{emp_id}", response_model=EmployeeRow, tags=["Employee"])
+def update_employee(emp_id: str, payload: EmployeeUpdate):
+    return _master_write(db.update_employee, emp_id, **payload.model_dump(exclude_unset=True))
+
+
+@router.delete("/employees/{emp_id}", tags=["Employee"])
+def delete_employee(emp_id: str):
+    return _master_write(db.delete_employee, emp_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -257,6 +383,29 @@ def get_courses(
     q: str | None = Query(default=None, description="search course_code / course_name"),
 ) -> list[dict[str, Any]]:
     return db.list_courses(category=category, is_mandatory=is_mandatory, q=q)
+
+
+@router.get("/courses/{course_code}", response_model=CourseRow, tags=["Course"])
+def get_course(course_code: str):
+    row = db.get_course(course_code)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"course {course_code} not found")
+    return row
+
+
+@router.post("/courses", response_model=CourseRow, status_code=201, tags=["Course"])
+def create_course(payload: CourseCreate):
+    return _master_write(db.create_course, **payload.model_dump())
+
+
+@router.patch("/courses/{course_code}", response_model=CourseRow, tags=["Course"])
+def update_course(course_code: str, payload: CourseUpdate):
+    return _master_write(db.update_course, course_code, **payload.model_dump(exclude_unset=True))
+
+
+@router.delete("/courses/{course_code}", tags=["Course"])
+def delete_course(course_code: str):
+    return _master_write(db.delete_course, course_code)
 
 
 @router.get("/training-records", response_model=list[TrainingRow], tags=["Training"])

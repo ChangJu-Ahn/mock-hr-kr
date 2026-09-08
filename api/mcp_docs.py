@@ -55,11 +55,25 @@ _TOOL_GROUPS: list[tuple[str, str, str, tuple[str, ...]]] = [
     ),
     (
         "employee",
-        "사원 조회 Employee lookup",
-        "위 도구에 넘길 emp_id를 찾고 사원의 전체 컨텍스트를 확인하기 위한 읽기 전용 도구입니다.",
-        ("list_employees", "get_employee"),
+        "사원 Employee",
+        "사원 조회·입사·수정·참조 없는 사원 삭제. 입사 시 생성된 연차와 발령도 삭제 방어 대상입니다.",
+        ("list_employees", "get_employee", "create_employee", "update_employee", "delete_employee"),
     ),
+    ("department", "부서 Department", "조직 기준정보 CRUD. 참조 중인 부서 삭제와 조직 순환은 차단합니다.",
+     ("list_departments", "get_department", "create_department", "update_department", "delete_department")),
+    ("position", "직급 Position", "직급·기본 연차 CRUD. 사원·발령이 참조 중이면 삭제할 수 없습니다.",
+     ("list_positions", "get_position", "create_position", "update_position", "delete_position")),
+    ("course", "과정 Course", "교육과정 CRUD. 교육이력이 있는 과정은 삭제할 수 없습니다.",
+     ("list_courses", "get_course", "create_course", "update_course", "delete_course")),
 ]
+
+for _singular, _plural, _label in (
+    ("employee", "employees", "사원"), ("department", "departments", "부서"),
+    ("position", "positions", "직급"), ("course", "courses", "교육"),
+):
+    for _name in (f"list_{_plural}", *(f"{action}_{_singular}"
+                                      for action in ("get", "create", "update", "delete"))):
+        _TOOL_CONSOLE_PAGE[_name] = (f"/{_plural}", _label)
 
 #: Parameter name -> realistic example value, so generated snippets are runnable
 #: against the seeded demo dataset.
@@ -85,6 +99,11 @@ _EXAMPLE_BY_NAME = {
     "reason": "가족 여행",
     "days": 1.0,
     "q": "김",
+    "name": "연결 테스트 사원",
+    "dept_name": "연결 테스트 부서",
+    "position_name": "연결 테스트 직급",
+    "course_code": "C001",
+    "course_name": "연결 테스트 과정",
 }
 
 #: Enumerations the underlying HR domain accepts, surfaced per parameter because
@@ -125,6 +144,26 @@ def _live_defaults() -> dict[str, Any]:
         if work_date:
             values["work_date"] = work_date
             values["month"] = work_date[:7]
+            values["start_date"] = work_date
+            values["end_date"] = work_date
+            values["date_from"] = work_date[:7] + "-01"
+            values["date_to"] = work_date
+        positions = db.list_positions()
+        courses = db.list_courses()
+        if positions:
+            values["position_code"] = positions[0]["position_code"]
+        if courses:
+            values["course_code"] = courses[0]["course_code"]
+        for field, codes, prefix in (
+            ("dept_code", db.list_department_codes(), "D_DEMO"),
+            ("position_code", db.list_position_codes(), "P_DEMO"),
+            ("course_code", db.list_course_codes(), "C_DEMO"),
+        ):
+            existing = set(codes)
+            suffix = 1
+            while f"{prefix}{suffix}" in existing:
+                suffix += 1
+            values[f"new_{field}"] = f"{prefix}{suffix}"
     except Exception:  # pragma: no cover - docs must render even without data
         pass
     return values
@@ -215,6 +254,18 @@ def _example_arguments(tool_name: str, params: list[dict[str, Any]],
     for param in params:
         if param["required"] or param["name"] in highlight:
             example[param["name"]] = _example_value(param, live)
+    for singular, field, label in (
+        ("employee", "name", "사원"), ("department", "dept_name", "부서"),
+        ("position", "position_name", "직급"), ("course", "course_name", "과정"),
+    ):
+        if tool_name == f"update_{singular}":
+            example["changes"] = {field: f"외부 수정 {label}"}
+    for singular, field, prefix in (
+        ("department", "dept_code", "D_DEMO"), ("position", "position_code", "P_DEMO"),
+        ("course", "course_code", "C_DEMO"),
+    ):
+        if tool_name == f"create_{singular}":
+            example[field] = live.get(f"new_{field}", f"{prefix}1")
     return example
 
 
